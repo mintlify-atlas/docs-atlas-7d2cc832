@@ -1,0 +1,111 @@
+{
+  "projectType": "general",
+  "projectName": "TerraLab",
+  "projectDescription": "Advanced astronomical visualization and terrain analysis engine combining real topographic horizons with precision star rendering and light pollution modeling",
+  "theme": "aspen",
+  "primaryColor": "#1e3a8a",
+  "lightColor": "#3b82f6",
+  "darkColor": "#0f172a",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/horizon-engine",
+              "concepts/light-pollution",
+              "concepts/astronomical-rendering"
+            ]
+          },
+          {
+            "group": "User Guide",
+            "pages": [
+              "guide/interface",
+              "guide/telescope-mode",
+              "guide/measurements",
+              "guide/data-sources"
+            ]
+          },
+          {
+            "group": "CLI Tools",
+            "pages": [
+              "cli/overview",
+              "cli/dvnl-preprocessing",
+              "cli/sqm-calibration"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Terrain Module",
+            "pages": [
+              "api/terrain/engine",
+              "api/terrain/worker",
+              "api/terrain/overlay"
+            ]
+          },
+          {
+            "group": "Light Pollution",
+            "pages": [
+              "api/light-pollution/bortle",
+              "api/light-pollution/calibration",
+              "api/light-pollution/kernels"
+            ]
+          },
+          {
+            "group": "Astronomical",
+            "pages": [
+              "api/astro/engine",
+              "api/astro/coordinates"
+            ]
+          },
+          {
+            "group": "Widgets",
+            "pages": [
+              "api/widgets/sky-widget",
+              "api/widgets/telescope-scope",
+              "api/widgets/measurements"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Real-time 360° topographic horizon calculation using Digital Elevation Models",
+    "Automatic light pollution analysis from DVNL satellite data to Bortle scale",
+    "High-precision celestial mechanics using Gaia star catalog and DE421 ephemerides",
+    "Interactive telescope simulator with adjustable FOV and scope modes",
+    "Earth curvature correction for distant terrain visibility",
+    "SQM (Sky Quality Meter) estimation with Gaussian convolution kernels",
+    "Multi-band depth rendering for atmospheric haze effects",
+    "PyQt5-based desktop interface with real-time sky rendering"
+  ],
+  "publicApiSurface": [
+    "terralab - Main GUI application entry point",
+    "terralab-dvnl-preprocess - Preprocess DVNL light pollution rasters",
+    "terralab-dvnl-convolve - Apply convolution kernels to DVNL data",
+    "terralab-predict-sqm - Predict Sky Quality Meter readings from satellite data",
+    "terralab-calibrate-sqm - Calibrate SQM models with ground truth data",
+    "TerraLab.terrain.engine.HorizonBaker - Generate horizon profiles via raycasting",
+    "TerraLab.light_pollution.bortle.sqm_to_bortle_class() - Convert SQM to Bortle scale",
+    "TerraLab.light_pollution.kernels.create_gaussian_kernel() - Generate light dispersion kernels",
+    "TerraLab.widgets.sky_widget.AstronomicalWidget - Main astronomical rendering widget",
+    "TerraLab.widgets.telescope_scope_mode.TelescopeScopeController - Telescope view controller",
+    "TerraLab.widgets.measurement_tools.MeasurementController - Angular measurement tools"
+  ]
+}
