@@ -1,0 +1,155 @@
+---
+title: "Light Pollution Sampler"
+description: "Sample DVNL radiance and estimate sky brightness during horizon raycasting"
+---
+
+## Overview
+
+The `light_pollution_sampler` module samples DVNL (Day/Night Visible Lights) raster data during horizon profile generation to estimate local sky brightness and Bortle class.
+
+## LightPollutionSampler
+
+Samples aggregated DVNL radiance at geographic coordinates.
+
+```python
+class LightPollutionSampler:
+    def __init__(self, dvnl_agg_path: str)
+```
+
+### Parameters
+
+<ParamField path="dvnl_agg_path" type="str" required>
+  Path to the aggregated (convolved) DVNL GeoTIFF file
+</ParamField>
+
+### Methods
+
+#### sample_at
+
+Sample DVNL radiance at a specific location.
+
+```python
+def sample_at(self, lat: float, lon: float) -> Optional[float]
+```
+
+<ParamField path="lat" type="float" required>
+  Latitude in decimal degrees (WGS84)
+</ParamField>
+
+<ParamField path="lon" type="float" required>
+  Longitude in decimal degrees (WGS84)
+</ParamField>
+
+**Returns**: Aggregated DVNL radiance value (nW/cm²/sr), or `None` if outside coverage or NoData
+
+#### estimate_sqm
+
+Estimate Sky Quality Meter reading at a location.
+
+```python
+def estimate_sqm(self, lat: float, lon: float) -> Optional[float]
+```
+
+<ParamField path="lat" type="float" required>
+  Latitude in decimal degrees
+</ParamField>
+
+<ParamField path="lon" type="float" required>
+  Longitude in decimal degrees
+</ParamField>
+
+**Returns**: Estimated SQM value in mag/arcsec², or `None` if no data
+
+**Formula**: Uses the empirical calibration model:
+
+$$
+\text{SQM} = 22.0 - 2.4 \cdot \log_{10}(R_{\text{agg}} + 0.001)
+$$
+
+#### estimate_bortle
+
+Estimate Bortle dark-sky class at a location.
+
+```python
+def estimate_bortle(self, lat: float, lon: float) -> Optional[int]
+```
+
+<ParamField path="lat" type="float" required>
+  Latitude in decimal degrees
+</ParamField>
+
+<ParamField path="lon" type="float" required>
+  Longitude in decimal degrees
+</ParamField>
+
+**Returns**: Bortle class (1-9), or `None` if no data
+
+### Example
+
+```python
+from TerraLab.terrain.light_pollution_sampler import LightPollutionSampler
+
+# Initialize with convolved DVNL data
+sampler = LightPollutionSampler("dvnl_convolved_30km.tif")
+
+# Sample at a dark sky site
+lat, lon = 42.1234, 1.5678
+
+# Get raw radiance
+radiance = sampler.sample_at(lat, lon)
+print(f"DVNL radiance: {radiance:.2f} nW/cm²/sr")
+
+# Estimate sky quality
+sqm = sampler.estimate_sqm(lat, lon)
+print(f"Estimated SQM: {sqm:.2f} mag/arcsec²")
+
+# Get Bortle class
+bortle = sampler.estimate_bortle(lat, lon)
+print(f"Bortle class: {bortle}")
+```
+
+## Integration with Horizon Engine
+
+The sampler is used during horizon profile generation to:
+
+1. **Sample at observer location**: Determine zenith sky brightness
+2. **Sample along rays**: Build directional light pollution maps
+3. **Create light domes**: Visualize light sources on the horizon
+
+### Usage in HorizonBaker
+
+```python
+from TerraLab.terrain.engine import HorizonBaker
+from TerraLab.terrain.light_pollution_sampler import LightPollutionSampler
+
+baker = HorizonBaker(
+    dem_provider=provider,
+    lp_sampler=LightPollutionSampler("dvnl_convolved.tif")
+)
+
+profile = baker.bake(
+    lat=42.0,
+    lon=2.0,
+    n_bands=20,
+    max_dist_m=150000
+)
+
+print(f"Observer Bortle class: {profile.bortle_class}")
+print(f"Observer SQM: {profile.sqm_estimate:.2f} mag/arcsec²")
+```
+
+## Thread Safety
+
+The sampler uses `RASTERIO_LOCK` for thread-safe concurrent access to the GeoTIFF file.
+
+## Performance Considerations
+
+- **Coordinate transformation**: Uses pyproj for accurate WGS84 → raster CRS conversion
+- **Bilinear interpolation**: Sub-pixel sampling for smooth gradients
+- **Caching**: Rasterio's internal caching reduces repeated I/O
+
+## See Also
+
+- [Light Pollution Concepts](/concepts/light-pollution) - DVNL processing pipeline
+- [Bortle Scale](/api/light-pollution/bortle) - SQM to Bortle conversion
+- [DVNL I/O](/api/light-pollution/dvnl-io) - Reading DVNL rasters

@@ -1,0 +1,215 @@
+---
+title: "Raster Providers"
+description: "Abstract interfaces and implementations for elevation data sources"
+---
+
+## Overview
+
+The `providers` module defines interfaces and implementations for accessing elevation data from various raster sources, including ASCII tile collections and large GeoTIFF files.
+
+## RasterProvider
+
+Abstract base class for all elevation data providers.
+
+```python
+class RasterProvider(abc.ABC):
+    """Interface for providing elevation data from various raster sources."""
+```
+
+### Abstract Methods
+
+#### get_elevation
+
+Retrieve elevation at projected coordinates.
+
+```python
+@abc.abstractmethod
+def get_elevation(self, x: float, y: float) -> Optional[float]
+```
+
+<ParamField path="x" type="float" required>
+  X coordinate in the provider's native CRS (typically UTM meters)
+</ParamField>
+
+<ParamField path="y" type="float" required>
+  Y coordinate in the provider's native CRS
+</ParamField>
+
+**Returns**: Elevation in meters, or `None` if outside coverage
+
+### Optional Methods
+
+#### prepare_region
+
+Pre-load or pre-cache data for a region before heavy sampling.
+
+```python
+def prepare_region(
+    self,
+    cx: float,
+    cy: float,
+    radius: float,
+    progress_callback=None
+)
+```
+
+<ParamField path="cx" type="float" required>
+  Center X coordinate
+</ParamField>
+
+<ParamField path="cy" type="float" required>
+  Center Y coordinate
+</ParamField>
+
+<ParamField path="radius" type="float" required>
+  Radius in meters to prepare
+</ParamField>
+
+<ParamField path="progress_callback" type="callable" default="None">
+  Optional callback function for progress reporting
+</ParamField>
+
+#### get_native_crs
+
+Return the coordinate reference system of the provider.
+
+```python
+def get_native_crs(self) -> str
+```
+
+**Returns**: EPSG code or PROJ string (default: `"EPSG:25831"` for UTM 31N)
+
+#### transform_coordinates
+
+Convert WGS84 lat/lon to provider's native CRS.
+
+```python
+def transform_coordinates(
+    self,
+    lat: float,
+    lon: float
+) -> Tuple[float, float]
+```
+
+<ParamField path="lat" type="float" required>
+  Latitude in decimal degrees (WGS84)
+</ParamField>
+
+<ParamField path="lon" type="float" required>
+  Longitude in decimal degrees (WGS84)
+</ParamField>
+
+**Returns**: Tuple of (x, y) in native CRS
+
+## AscRasterProvider
+
+Provider for ESRI ASCII Grid tile collections (e.g., ICGC 5×5km tiles).
+
+```python
+class AscRasterProvider(RasterProvider):
+    def __init__(self, tiles_dir: str)
+```
+
+### Parameters
+
+<ParamField path="tiles_dir" type="str" required>
+  Directory containing ASCII Grid (.txt or .asc) files
+</ParamField>
+
+### Methods
+
+#### initialize
+
+Scan the tiles directory and build spatial index.
+
+```python
+def initialize(self, progress_callback=None)
+```
+
+<ParamField path="progress_callback" type="callable" default="None">
+  Optional callback for progress reporting
+</ParamField>
+
+#### prepare_region
+
+Load tiles within radius of center point into cache.
+
+```python
+def prepare_region(
+    self,
+    cx: float,
+    cy: float,
+    radius: float,
+    progress_callback=None,
+    abort_check=None
+)
+```
+
+<ParamField path="abort_check" type="callable" default="None">
+  Optional callback that returns `True` to abort loading
+</ParamField>
+
+### Caching Behavior
+
+- **First parse**: ASCII files are parsed (~500ms per 5×5km tile)
+- **Binary cache**: Parsed tiles are saved as `.npy` files (~10ms to load)
+- **Memory cache**: Tiles are kept in memory for fast repeated access
+
+### Example
+
+```python
+from TerraLab.terrain.providers import AscRasterProvider
+
+provider = AscRasterProvider("/path/to/icgc_tiles/")
+provider.initialize()
+
+# Transform lat/lon to UTM
+x, y = provider.transform_coordinates(lat=41.3874, lon=2.1686)
+
+# Prepare 50km radius
+provider.prepare_region(x, y, radius=50000)
+
+# Get elevation
+elev = provider.get_elevation(x, y)
+print(f"Elevation: {elev:.1f}m")
+```
+
+## TiffRasterWindowProvider
+
+Provider for large single GeoTIFF files (e.g., Copernicus 30m DEM).
+
+```python
+class TiffRasterWindowProvider(RasterProvider):
+    def __init__(self, tiff_path: str)
+```
+
+### Parameters
+
+<ParamField path="tiff_path" type="str" required>
+  Path to the GeoTIFF file
+</ParamField>
+
+### Characteristics
+
+- **Window-based reading**: Extracts only needed regions
+- **Thread-safe**: Uses `RASTERIO_LOCK` for concurrent access
+- **Bilinear interpolation**: Sub-pixel elevation sampling
+- **Memory efficient**: Does not load entire raster
+
+### Example
+
+```python
+from TerraLab.terrain.providers import TiffRasterWindowProvider
+
+provider = TiffRasterWindowProvider("copernicus_dem_30m.tif")
+
+x, y = provider.transform_coordinates(lat=41.3874, lon=2.1686)
+elev = provider.get_elevation(x, y)
+print(f"Elevation: {elev:.1f}m")
+```
+
+## See Also
+
+- [Horizon Engine](/api/terrain/engine) - Uses providers for DEM sampling
+- [Terrain Worker](/api/terrain/worker) - Background processing with providers
+- [Data Sources](/guide/data-sources) - Where to obtain DEM data

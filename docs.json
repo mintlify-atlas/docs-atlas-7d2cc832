@@ -67,7 +67,9 @@
             "pages": [
               "api/terrain/engine",
               "api/terrain/worker",
-              "api/terrain/overlay"
+              "api/terrain/overlay",
+              "api/terrain/providers",
+              "api/terrain/light-pollution-sampler"
             ]
           },
           {
@@ -75,7 +77,9 @@
             "pages": [
               "api/light-pollution/bortle",
               "api/light-pollution/calibration",
-              "api/light-pollution/kernels"
+              "api/light-pollution/kernels",
+              "api/light-pollution/mlim",
+              "api/light-pollution/dvnl-io"
             ]
           },
           {

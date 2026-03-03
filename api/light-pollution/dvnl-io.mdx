@@ -1,0 +1,106 @@
+---
+title: "DVNL I/O"
+description: "Input/output utilities for DVNL GeoTIFF raster files"
+---
+
+## Overview
+
+The `dvnl_io` module provides utilities for reading Defense Meteorological Satellite Program (DMSP) Visible Near-infrared (DVNL) GeoTIFF files with proper NoData handling.
+
+## read_raster_metadata
+
+Reads basic metadata from a raster file without loading the full array.
+
+```python
+def read_raster_metadata(path: str) -> dict
+```
+
+### Parameters
+
+<ParamField path="path" type="str" required>
+  Path to the GeoTIFF file
+</ParamField>
+
+### Returns
+
+<ResponseField name="metadata" type="dict">
+  Dictionary containing raster metadata including:
+  - `width`: Raster width in pixels
+  - `height`: Raster height in pixels
+  - `crs`: Coordinate reference system
+  - `transform`: Affine transformation matrix
+  - `dtype`: Data type of the raster
+  - `nodata`: NoData value
+</ResponseField>
+
+### Example
+
+```python
+from TerraLab.light_pollution.dvnl_io import read_raster_metadata
+
+meta = read_raster_metadata("C_DVNL_2022.tif")
+print(f"Dimensions: {meta['width']} x {meta['height']}")
+print(f"CRS: {meta['crs']}")
+print(f"NoData value: {meta['nodata']}")
+```
+
+## read_raster_window_filtered
+
+Reads a specific window from a raster with NoData filtering.
+
+```python
+def read_raster_window_filtered(
+    path: str,
+    window: Window
+) -> np.ndarray
+```
+
+### Parameters
+
+<ParamField path="path" type="str" required>
+  Path to the GeoTIFF file
+</ParamField>
+
+<ParamField path="window" type="rasterio.windows.Window" required>
+  Window object specifying the region to read (row offset, column offset, height, width)
+</ParamField>
+
+### Returns
+
+<ResponseField name="array" type="np.ndarray">
+  Float32 array with NoData values replaced by `np.nan`
+</ResponseField>
+
+### NoData Handling
+
+This function handles NoData in two ways:
+
+1. **Metadata NoData**: If the raster has a NoData value in its metadata, those pixels are converted to `np.nan`
+2. **Outlier Detection**: Values exceeding `1e10` are also converted to `np.nan` (DVNL data sometimes has extreme values without proper metadata)
+
+### Example
+
+```python
+import rasterio
+from rasterio.windows import Window
+from TerraLab.light_pollution.dvnl_io import read_raster_window_filtered
+
+# Read a 1024x1024 window starting at (0, 0)
+window = Window(col_off=0, row_off=0, width=1024, height=1024)
+data = read_raster_window_filtered("C_DVNL_2022.tif", window)
+
+# Count valid pixels
+valid_pixels = np.sum(~np.isnan(data))
+print(f"Valid pixels: {valid_pixels} / {data.size}")
+```
+
+### Use Cases
+
+- **Memory-efficient processing**: Read only the region of interest
+- **Tiled processing**: Process large rasters in smaller chunks
+- **Convolution operations**: Read with halo overlap for kernel operations
+
+## See Also
+
+- [DVNL Preprocessing](/cli/dvnl-preprocessing) - CLI tools for DVNL data processing
+- [Kernels](/api/light-pollution/kernels) - Convolution kernels for light dispersion

@@ -1,0 +1,120 @@
+---
+title: "Limiting Magnitude"
+description: "Calculate visual limiting magnitude from Bortle class and altitude"
+---
+
+## Overview
+
+The `mlim` module calculates the visual limiting magnitude for an observer based on the Bortle dark-sky class and the altitude angle of the observed celestial object.
+
+## calculate_mlim
+
+Calculates the visual limiting magnitude adjusted for altitude angle.
+
+```python
+def calculate_mlim(
+    bortle_class: int,
+    h_deg: float,
+    k: float = 0.25
+) -> float
+```
+
+### Parameters
+
+<ParamField path="bortle_class" type="int" required>
+  Bortle class (1-9) representing sky darkness
+</ParamField>
+
+<ParamField path="h_deg" type="float" required>
+  Altitude angle above the horizon in degrees (clamped to 10-90°)
+</ParamField>
+
+<ParamField path="k" type="float" default="0.25">
+  Atmospheric extinction coefficient (typically 0.15-0.45)
+  - 0.15: Exceptionally clear, high altitude
+  - 0.25: Typical conditions (default)
+  - 0.45: Hazy or humid conditions
+</ParamField>
+
+### Returns
+
+<ResponseField name="mlim" type="float">
+  Estimated limiting magnitude at the specified altitude
+</ResponseField>
+
+### Formula
+
+The zenith limiting magnitude is calculated as:
+
+$$
+m_{\text{lim,zenith}} = 7.6 - 0.5 \cdot (B - 1)
+$$
+
+Where $B$ is the Bortle class. This is then adjusted for altitude using atmospheric extinction:
+
+$$
+m_{\text{lim}}(h) = m_{\text{lim,zenith}} - k \left( \frac{1}{\sin h} - 1 \right)
+$$
+
+### Example
+
+```python
+from TerraLab.light_pollution.mlim import calculate_mlim
+
+# Bortle 3 site, observing at 30° altitude
+mlim = calculate_mlim(bortle_class=3, h_deg=30.0, k=0.25)
+print(f"Limiting magnitude: {mlim:.2f}")  # ~6.2
+
+# Same site at zenith (90°)
+mlim_zenith = calculate_mlim(bortle_class=3, h_deg=90.0)
+print(f"Zenith limiting magnitude: {mlim_zenith:.2f}")  # ~6.6
+```
+
+## calculate_mlim_from_sqm
+
+Convenience function to calculate limiting magnitude directly from SQM reading.
+
+```python
+def calculate_mlim_from_sqm(
+    sqm: float,
+    h_deg: float,
+    k: float = 0.25
+) -> float
+```
+
+### Parameters
+
+<ParamField path="sqm" type="float" required>
+  Sky brightness in mag/arcsec²
+</ParamField>
+
+<ParamField path="h_deg" type="float" required>
+  Altitude angle in degrees
+</ParamField>
+
+<ParamField path="k" type="float" default="0.25">
+  Atmospheric extinction coefficient
+</ParamField>
+
+### Returns
+
+<ResponseField name="mlim" type="float">
+  Estimated limiting magnitude
+</ResponseField>
+
+### Example
+
+```python
+from TerraLab.light_pollution.mlim import calculate_mlim_from_sqm
+
+# SQM reading of 21.5 mag/arcsec², observing at 45°
+mlim = calculate_mlim_from_sqm(sqm=21.5, h_deg=45.0)
+print(f"Limiting magnitude: {mlim:.2f}")
+```
+
+This function internally converts the SQM value to a Bortle class using `sqm_to_bortle_class()` and then calls `calculate_mlim()`.
+
+## See Also
+
+- [Bortle Scale](/api/light-pollution/bortle) - Convert SQM to Bortle class
+- [Light Pollution Concepts](/concepts/light-pollution) - Understanding the DVNL → SQM → Bortle pipeline
