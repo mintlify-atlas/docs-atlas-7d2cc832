@@ -1,0 +1,254 @@
+---
+title: Installation
+description: Install TerraLab dependencies and download required astronomical data files
+---
+
+# Installation
+
+TerraLab requires Python 3.10+ and several scientific computing libraries for astronomical calculations and geospatial processing.
+
+## System Requirements
+
+- **Python**: 3.10 or higher (tested up to 3.12)
+- **Operating System**: Linux, macOS, or Windows
+- **Disk Space**: ~2GB for data files (star catalog, ephemerides, light pollution maps)
+- **Memory**: 4GB RAM minimum, 8GB recommended
+
+## Install via pip
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone https://github.com/your-org/TerraLab.git
+    cd TerraLab
+    ```
+  </Step>
+  
+  <Step title="Install Dependencies">
+    <CodeGroup>
+      ```bash pip
+      pip install -r requirements.txt
+      ```
+      
+      ```bash pip (editable)
+      pip install -e .
+      ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Install via Conda
+
+For a more isolated environment, use the provided `environment.yml`:
+
+```bash
+conda env create -f environment.yml
+conda activate terralab
+```
+
+## Core Dependencies
+
+The following packages are installed automatically:
+
+### Required Packages
+
+| Package | Version | Purpose |
+|---------|---------|----------|
+| **PyQt5** | 5.15.9+ | GUI framework for the astronomical canvas |
+| **numpy** | 1.26+ | Vectorized celestial calculations |
+| **skyfield** | 1.46+ | High-precision astronomical computations |
+| **rasterio** | 1.3.10+ | GeoTIFF DEM and light pollution raster I/O |
+| **pyproj** | 3.6+ | Coordinate reference system transformations |
+| **scipy** | 1.11+ | Scientific computing (convolutions, interpolation) |
+| **scikit-learn** | 1.4+ | Machine learning for SQM calibration |
+| **pandas** | 2.1+ | Data manipulation for star catalogs |
+| **tqdm** | 4.66+ | Progress bars for data processing |
+
+### Optional Dependencies
+
+For advanced geospatial processing:
+
+```bash
+pip install "terralab[geo]"
+```
+
+Includes:
+- **xarray** (≥2024.1): Multi-dimensional arrays for raster analysis
+- **rioxarray**: Xarray extension for GeoTIFF handling
+- **dask**: Parallel processing for large DEM datasets
+
+### Development Tools
+
+```bash
+pip install "terralab[dev]"
+```
+
+Includes:
+- **pytest** (≥8): Unit testing framework
+- **pytest-cov** (≥4): Test coverage reporting
+- **ruff** (≥0.6): Fast Python linter and formatter
+
+## Required Data Files
+
+<Warning>
+TerraLab **requires** the following data files to function. Place them in the specified directories:
+</Warning>
+
+### 1. Gaia Star Catalog
+
+**File**: `gaia_stars.json`  
+**Location**: `TerraLab/data/stars/`  
+**Size**: ~14 MB  
+**Source**: [ESA Gaia Mission](https://www.cosmos.esa.int/web/gaia)
+
+Contains stellar positions (RA/Dec), proper motions, parallax, and photometry for bright stars.
+
+<Note>
+The bundled `gaia_stars.json` includes stars visible to the naked eye (magnitude < 6.5) plus reference stars for telescope alignment.
+</Note>
+
+### 2. DE421 Ephemerides
+
+**File**: `de421.bsp`  
+**Location**: `TerraLab/data/stars/`  
+**Size**: ~16 MB  
+**Source**: [NASA/JPL HORIZONS](https://ssd.jpl.nasa.gov/horizons.cgi)
+
+Provides high-precision positions for the Sun, Moon, and planets from 1900-2050.
+
+```bash
+# Download DE421 directly from JPL
+wget https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de421.bsp \
+  -O TerraLab/data/stars/de421.bsp
+```
+
+### 3. DVNL Light Pollution Map
+
+**File**: `C_DVNL 2022.tif`  
+**Location**: `TerraLab/data/light_pollution/`  
+**Size**: ~38 MB (compressed GeoTIFF)  
+**Source**: [Earth Observation Group](https://eogdata.mines.edu/products/vnl/)
+
+Satellite-derived visible nighttime lights for Bortle scale classification.
+
+<CodeGroup>
+  ```bash Direct Download
+  # Download from Earth Observation Group
+  # Place in TerraLab/data/light_pollution/
+  ```
+  
+  ```bash Use Bundled Data
+  # TerraLab ships with a regional DVNL extract
+  # Full global coverage available on request
+  ```
+</CodeGroup>
+
+## Directory Structure
+
+After installation, your data directory should look like:
+
+```
+TerraLab/
+├── data/
+│   ├── stars/
+│   │   ├── gaia_stars.json     # ✓ Star catalog
+│   │   └── de421.bsp           # ✓ Ephemerides
+│   └── light_pollution/
+│       ├── C_DVNL 2022.tif     # ✓ Light pollution raster
+│       ├── C_DVNL 2022.tif.ovr # Overviews (auto-generated)
+│       └── C_DVNL 2022.tfw     # World file
+└── ...
+```
+
+## Optional: Digital Elevation Models
+
+For real terrain horizons, download DEM tiles for your region:
+
+### Catalonia (Spain)
+**Source**: [ICGC - Institut Cartogràfic i Geològic de Catalunya](https://www.icgc.cat/)  
+**Format**: ESRI ASCII Grid (.asc) or GeoTIFF (.tif)  
+**Resolution**: 5m (urban), 15m (rural)
+
+### Europe-Wide
+**Source**: [Copernicus DEM](https://spacedata.copernicus.eu/collections/copernicus-digital-elevation-model)  
+**Format**: GeoTIFF  
+**Resolution**: 25m  
+**Coverage**: Pan-European, tiled in 5°×5° blocks
+
+### United States
+**Source**: [USGS National Map](https://www.usgs.gov/programs/national-geospatial-program/national-map)  
+**Format**: GeoTIFF  
+**Resolution**: 10m (3DEP)
+
+<Note>
+**Recommendation**: Download at least 150km radius of DEM tiles around your observing location. TerraLab supports tiled datasets—place all `.asc` or `.tif` files in a single folder.
+</Note>
+
+## Verify Installation
+
+Check that all dependencies are installed:
+
+```bash
+python -c "import TerraLab; print('TerraLab version:', TerraLab.__version__)"
+```
+
+Test Skyfield integration:
+
+```bash
+python -c "from skyfield.api import load; print('Skyfield OK')"
+```
+
+Verify data files exist:
+
+```bash
+ls -lh TerraLab/data/stars/
+ls -lh TerraLab/data/light_pollution/
+```
+
+## Troubleshooting
+
+### PyQt5 Installation Issues
+
+If `pip install PyQt5` fails:
+
+<CodeGroup>
+  ```bash macOS
+  brew install pyqt@5
+  pip install PyQt5
+  ```
+  
+  ```bash Ubuntu/Debian
+  sudo apt-get install python3-pyqt5
+  pip install --no-binary PyQt5 PyQt5
+  ```
+  
+  ```bash Windows
+  # Use pre-built wheel
+  pip install PyQt5 --prefer-binary
+  ```
+</CodeGroup>
+
+### Rasterio/GDAL Issues
+
+Rasterio requires GDAL. If installation fails:
+
+```bash
+# Install GDAL first (Conda recommended)
+conda install -c conda-forge rasterio
+
+# Or via system package manager
+sudo apt-get install gdal-bin libgdal-dev  # Ubuntu
+brew install gdal  # macOS
+```
+
+### Missing Data Files
+
+If TerraLab launches but shows a configuration dialog:
+
+1. Check that `gaia_stars.json` and `de421.bsp` exist in `TerraLab/data/stars/`
+2. Check that `C_DVNL 2022.tif` exists in `TerraLab/data/light_pollution/`
+3. Re-clone the repository if files are missing (they should be included)
+
+## Next Steps
+
+Once installed, proceed to the [Quick Start](/quickstart) guide to configure terrain and launch TerraLab.

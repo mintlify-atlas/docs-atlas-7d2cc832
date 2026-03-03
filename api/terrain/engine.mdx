@@ -1,0 +1,511 @@
+---
+title: 'Engine'
+description: 'Core horizon profile computation engine with raycasting and DEM tile management'
+---
+
+## Overview
+
+The terrain engine provides real topographic horizon profile computation by loading ICGC 5×5 DEM tiles (ESRI ASCII Grid .txt), caching them as .npy files, and computing multi-band horizon silhouettes via raycasting with Earth curvature correction.
+
+## Constants
+
+<ParamField path="R_EARTH" type="float" default="6371000.0">
+  Earth radius in meters used for curvature correction
+</ParamField>
+
+## Functions
+
+### generate_bands
+
+```python
+generate_bands(n: int = 20, max_dist_m: float = 150_000) -> list
+```
+
+Generates N horizon bands with logarithmic distribution across zones (piecewise bilog).
+
+#### Zones
+
+- **Near zone** (0 → 5km): 2/3 of the N bands. Captures foreground detail (hills, cliffs, passes).
+- **Far zone** (5km → max): 1/3 of the N bands. Represents atmospheric haze with fewer bands.
+
+<ParamField path="n" type="int" default="20">
+  Total number of bands
+  - 10 = Low quality
+  - 20 = Normal quality
+  - 40 = High quality
+  - 60 = Ultra quality
+  - 80 = Extreme quality
+</ParamField>
+
+<ParamField path="max_dist_m" type="float" default="150000">
+  Maximum calculation distance in meters
+</ParamField>
+
+#### Returns
+
+List of dictionaries with:
+- `id` (str): Band identifier (e.g., "gnd_0_71", "near_144_208", "far_25k_38k")
+- `min` (float): Minimum distance in meters
+- `max` (float): Maximum distance in meters
+
+#### Example
+
+```python
+from TerraLab.terrain.engine import generate_bands
+
+# Generate 40 bands for high quality
+bands = generate_bands(n=40, max_dist_m=150_000)
+
+for band in bands[:3]:
+    print(f"{band['id']}: {band['min']:.0f}m - {band['max']:.0f}m")
+# Output:
+# gnd_0_1: 0m - 1m
+# gnd_1_2: 1m - 2m
+# gnd_2_4: 2m - 4m
+```
+
+### bake_and_save
+
+```python
+bake_and_save(
+    lat: float,
+    lon: float,
+    tiles_dir: str,
+    output_path: str,
+    radius: float = 100_000,
+    step_m: float = 50,
+    resolution_deg: float = 0.5,
+    eye_height: float = 1.7,
+    band_defs: Optional[List[Dict]] = None
+)
+```
+
+Full pipeline: transforms coordinates, indexes tiles, bakes horizon profile, and saves to .npz file.
+
+<ParamField path="lat" type="float" required>
+  Observer latitude (WGS84)
+</ParamField>
+
+<ParamField path="lon" type="float" required>
+  Observer longitude (WGS84)
+</ParamField>
+
+<ParamField path="tiles_dir" type="str" required>
+  Directory containing DEM tiles
+</ParamField>
+
+<ParamField path="output_path" type="str" required>
+  Path to save the .npz profile file
+</ParamField>
+
+<ParamField path="radius" type="float" default="100000">
+  Maximum raycasting distance in meters
+</ParamField>
+
+<ParamField path="step_m" type="float" default="50">
+  Raycasting step size in meters
+</ParamField>
+
+<ParamField path="resolution_deg" type="float" default="0.5">
+  Azimuth resolution in degrees
+</ParamField>
+
+<ParamField path="eye_height" type="float" default="1.7">
+  Observer eye height above ground in meters
+</ParamField>
+
+<ParamField path="band_defs" type="List[Dict]" default="None">
+  Optional custom band definitions. If None, uses DEFAULT_BANDS (20 bands)
+</ParamField>
+
+#### Returns
+
+HorizonProfile object containing the baked profile data.
+
+### load_profile
+
+```python
+load_profile(path: str) -> Optional[HorizonProfile]
+```
+
+Loads a pre-baked horizon profile from disk.
+
+<ParamField path="path" type="str" required>
+  Path to the .npz profile file
+</ParamField>
+
+#### Returns
+
+HorizonProfile object or None if the file is missing or invalid.
+
+## Classes
+
+### HorizonProfile
+
+Serializable horizon profile result.
+
+#### Attributes
+
+<ParamField path="azimuths" type="np.ndarray">
+  Array of azimuths in degrees (0-360), shape (N,)
+</ParamField>
+
+<ParamField path="bands" type="List[Dict]">
+  List of band dictionaries, each containing:
+  - `id` (str): Band identifier
+  - `angles` (np.ndarray): Elevation angles in radians
+  - `dists` (np.ndarray): Distances in meters
+  - `heights` (np.ndarray): Terrain heights in meters
+</ParamField>
+
+<ParamField path="observer_lat" type="float" default="0.0">
+  Observer latitude in degrees
+</ParamField>
+
+<ParamField path="observer_lon" type="float" default="0.0">
+  Observer longitude in degrees
+</ParamField>
+
+<ParamField path="light_domes" type="Optional[np.ndarray]" default="None">
+  Light pollution dome values per azimuth
+</ParamField>
+
+<ParamField path="light_peak_distances" type="Optional[np.ndarray]" default="None">
+  Distances of maximum light source per azimuth
+</ParamField>
+
+#### Methods
+
+##### get_band_points
+
+```python
+get_band_points(band_id: str) -> List[Tuple[float, float]]
+```
+
+Returns list of (azimuth_deg, elevation_deg) tuples for a given band.
+
+<ParamField path="band_id" type="str" required>
+  Band identifier (e.g., "near_144_208")
+</ParamField>
+
+##### save
+
+```python
+save(path: str)
+```
+
+Saves the profile to a compressed .npz file.
+
+<ParamField path="path" type="str" required>
+  Output file path
+</ParamField>
+
+##### load (static)
+
+```python
+@staticmethod
+load(path: str) -> HorizonProfile
+```
+
+Loads a profile from a .npz file.
+
+<ParamField path="path" type="str" required>
+  Path to the .npz file
+</ParamField>
+
+### HorizonBaker
+
+Raycasts from observer position to compute horizon elevation angles. When a ray exits available DEM coverage, it stops and keeps whatever silhouette data was already gathered.
+
+#### Constructor
+
+```python
+HorizonBaker(
+    provider,
+    eye_height: float = 1.7,
+    R: float = R_EARTH
+)
+```
+
+<ParamField path="provider" type="DemSampler" required>
+  DEM elevation provider with get_elevation(x, y) method
+</ParamField>
+
+<ParamField path="eye_height" type="float" default="1.7">
+  Observer eye height above ground in meters
+</ParamField>
+
+<ParamField path="R" type="float" default="6371000.0">
+  Earth radius in meters for curvature correction
+</ParamField>
+
+#### Methods
+
+##### bake
+
+```python
+bake(
+    obs_x: float,
+    obs_y: float,
+    obs_h_ground: Optional[float] = None,
+    step_m: float = 50,
+    d_max: float = 100_000,
+    delta_az_deg: float = 0.5,
+    band_defs: Optional[List[Dict]] = None,
+    progress_callback = None,
+    light_sampler = None,
+    abort_check = None
+) -> Tuple[np.ndarray, List[Dict], np.ndarray]
+```
+
+Computes multi-band horizon profile using raycasting.
+
+<ParamField path="obs_x" type="float" required>
+  Observer X coordinate in projected CRS (e.g., UTM)
+</ParamField>
+
+<ParamField path="obs_y" type="float" required>
+  Observer Y coordinate in projected CRS
+</ParamField>
+
+<ParamField path="obs_h_ground" type="Optional[float]" default="None">
+  Observer ground elevation. If None, sampled from DEM
+</ParamField>
+
+<ParamField path="step_m" type="float" default="50">
+  Initial raycasting step size in meters. Adaptive stepping is used: starts at 0.5m, grows to step_m, then multiplies for distant ranges
+</ParamField>
+
+<ParamField path="d_max" type="float" default="100000">
+  Maximum raycasting distance in meters
+</ParamField>
+
+<ParamField path="delta_az_deg" type="float" default="0.5">
+  Azimuth resolution in degrees
+</ParamField>
+
+<ParamField path="band_defs" type="Optional[List[Dict]]" default="None">
+  Custom band definitions. If None, uses DEFAULT_BANDS
+</ParamField>
+
+<ParamField path="progress_callback" type="callable" default="None">
+  Optional callback(percent: int, msg: str) for progress updates
+</ParamField>
+
+<ParamField path="light_sampler" type="object" default="None">
+  Optional light pollution sampler with get_radiance_utm(x, y) method
+</ParamField>
+
+<ParamField path="abort_check" type="callable" default="None">
+  Optional callable() -> bool to check for abort requests
+</ParamField>
+
+**Returns:** Tuple of (azimuths, bands, light_domes, light_peak_distances)
+
+### TileIndex
+
+Indexes DEM tiles by bounding box in projected coordinates.
+
+#### Constructor
+
+```python
+TileIndex(
+    tiles_dir: str,
+    patterns: list = ["*.asc", "*.txt", "*.npy"],
+    callback = None
+)
+```
+
+<ParamField path="tiles_dir" type="str" required>
+  Directory containing DEM tiles
+</ParamField>
+
+<ParamField path="patterns" type="list" default="['*.asc', '*.txt', '*.npy']">
+  File patterns to search for
+</ParamField>
+
+<ParamField path="callback" type="callable" default="None">
+  Optional progress callback(current, total, message)
+</ParamField>
+
+#### Attributes
+
+<ParamField path="tiles" type="List[Dict]">
+  List of indexed tile dictionaries with 'path', 'header', and 'bbox'
+</ParamField>
+
+<ParamField path="global_bbox" type="List[float]">
+  Global bounding box [xmin, ymin, xmax, ymax] covering all tiles
+</ParamField>
+
+#### Methods
+
+##### find_tile
+
+```python
+find_tile(x: float, y: float) -> Optional[Dict]
+```
+
+Returns the first tile containing the point (x, y).
+
+##### get_overlapping_tiles
+
+```python
+get_overlapping_tiles(
+    cx: float,
+    cy: float,
+    radius: float
+) -> List[Dict]
+```
+
+Returns all tiles within radius of (cx, cy), sorted by distance (closest first).
+
+<ParamField path="cx" type="float" required>
+  Center X coordinate
+</ParamField>
+
+<ParamField path="cy" type="float" required>
+  Center Y coordinate
+</ParamField>
+
+<ParamField path="radius" type="float" required>
+  Search radius in meters
+</ParamField>
+
+### TileCache
+
+LRU cache for loaded DEM grids with .npy binary caching on disk. Thread-safe.
+
+#### Constructor
+
+```python
+TileCache(capacity: int = 16)
+```
+
+<ParamField path="capacity" type="int" default="16">
+  Maximum number of tiles to keep in memory
+</ParamField>
+
+#### Methods
+
+##### load
+
+```python
+load(tile_info: Dict) -> Tuple[Optional[np.ndarray], Optional[Dict]]
+```
+
+Loads a DEM tile, using cached .npy if available, otherwise parses the ASCII grid.
+
+<ParamField path="tile_info" type="Dict" required>
+  Tile dictionary from TileIndex with 'path' and 'header' keys
+</ParamField>
+
+**Returns:** Tuple of (data_array, header_dict) or (None, None) on error
+
+### DemSampler
+
+Samples elevation from DEM tiles with bilinear interpolation.
+
+#### Constructor
+
+```python
+DemSampler(tile_index: TileIndex, tile_cache: TileCache)
+```
+
+<ParamField path="tile_index" type="TileIndex" required>
+  TileIndex instance for finding tiles
+</ParamField>
+
+<ParamField path="tile_cache" type="TileCache" required>
+  TileCache instance for loading tiles
+</ParamField>
+
+#### Methods
+
+##### sample / get_elevation
+
+```python
+sample(x: float, y: float) -> Optional[float]
+get_elevation(x: float, y: float) -> Optional[float]
+```
+
+Samples elevation at (x, y) with bilinear interpolation. Both methods are equivalent.
+
+<ParamField path="x" type="float" required>
+  X coordinate in projected CRS
+</ParamField>
+
+<ParamField path="y" type="float" required>
+  Y coordinate in projected CRS
+</ParamField>
+
+**Returns:** Elevation in meters or None if outside DEM coverage
+
+##### transform_coordinates_inverse
+
+```python
+transform_coordinates_inverse(
+    x: float,
+    y: float
+) -> Tuple[float, float]
+```
+
+Converts UTM 31N coordinates back to Lat/Lon (WGS84).
+
+<ParamField path="x" type="float" required>
+  UTM X coordinate
+</ParamField>
+
+<ParamField path="y" type="float" required>
+  UTM Y coordinate
+</ParamField>
+
+**Returns:** Tuple of (latitude, longitude) in degrees
+
+## Example Usage
+
+```python
+from TerraLab.terrain.engine import (
+    TileIndex,
+    TileCache,
+    DemSampler,
+    HorizonBaker,
+    generate_bands,
+    bake_and_save
+)
+
+# Full pipeline approach
+profile = bake_and_save(
+    lat=42.1234,
+    lon=1.5678,
+    tiles_dir="/path/to/dem/tiles",
+    output_path="horizon_profile.npz",
+    radius=150_000,  # 150km
+    step_m=50,
+    resolution_deg=0.5,
+    eye_height=1.7,
+    band_defs=generate_bands(40)  # High quality
+)
+
+# Manual approach for more control
+tile_index = TileIndex("/path/to/dem/tiles")
+tile_cache = TileCache(capacity=100)
+sampler = DemSampler(tile_index, tile_cache)
+baker = HorizonBaker(sampler, eye_height=1.7)
+
+# Transform coordinates to UTM
+from pyproj import Transformer
+transformer = Transformer.from_crs("EPSG:4326", "EPSG:25831", always_xy=True)
+x_utm, y_utm = transformer.transform(lon, lat)
+
+# Bake profile
+azimuths, bands, light_domes, light_peak_distances = baker.bake(
+    obs_x=x_utm,
+    obs_y=y_utm,
+    obs_h_ground=None,  # Auto-sample from DEM
+    step_m=50,
+    d_max=150_000,
+    delta_az_deg=0.5,
+    band_defs=generate_bands(40)
+)
+```

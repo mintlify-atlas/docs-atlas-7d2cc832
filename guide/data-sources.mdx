@@ -1,0 +1,584 @@
+---
+title: Data Sources
+description: Required data files, data sources, and directory structure for TerraLab
+---
+
+# Data Sources
+
+TerraLab requires several data files to function correctly. This guide explains the required datasets, where to obtain them, and how to organize them.
+
+## Required Data Files
+
+TerraLab depends on four critical datasets:
+
+1. **DEM Tiles or GeoTIFF**: Terrain elevation data
+2. **DVNL GeoTIFF**: Light pollution / night lights data
+3. **Gaia Star Catalog**: Stellar positions and photometry
+4. **DE421 Ephemeris**: Solar system body positions
+
+## Directory Structure
+
+Place data files in the `TerraLab/data/` directory:
+
+```
+TerraLab/
+├── data/
+│   ├── stars/
+│   │   ├── gaia_stars.json
+│   │   └── de421.bsp
+│   ├── light_pollution/
+│   │   └── C_DVNL 2022.tif
+│   └── dem/
+│       ├── tiles/              # For ASC tile format
+│       │   ├── tile_001.asc
+│       │   └── ...
+│       └── europe_dem.tif      # For single large GeoTIFF
+└── ...
+```
+
+## 1. Digital Elevation Models (DEM)
+
+TerraLab supports two DEM formats:
+
+### Format A: Tiled ESRI ASCII Grid (.asc)
+
+**Provider:** ICGC (Institut Cartogràfic i Geològic de Catalunya)
+
+**Specifications:**
+- Format: ESRI ASCII Grid (.asc) or NumPy binary cache (.npy)
+- Coordinate System: UTM Zone 31N (EPSG:25831)
+- Resolution: Typically 5m, 15m, or 30m per pixel
+- Coverage: Regional (e.g., Catalonia)
+
+**Where to Obtain:**
+- ICGC Download: https://www.icgc.cat/en/Downloads/Elevation-data
+- Select "Digital Elevation Model" (MET)
+- Download tiles covering your area of interest
+
+**Directory Organization:**
+```
+dem/tiles/
+├── E320000_N4580000.asc
+├── E325000_N4580000.asc
+└── ...
+```
+
+**Implementation:** `AscRasterProvider` in `terrain/providers.py:77-134`
+
+### Format B: Large GeoTIFF
+
+**Provider:** Copernicus Land Monitoring Service (European Space Agency)
+
+**Specifications:**
+- Format: Cloud-Optimized GeoTIFF (COG) or standard GeoTIFF
+- Coordinate System: Various (auto-detected), typically EPSG:4326 or EPSG:3035
+- Resolution: 25m to 90m per pixel
+- Coverage: Continental (e.g., all of Europe)
+- File Size: Can exceed 18 GB for continental coverage
+
+**Where to Obtain:**
+- Copernicus EU-DEM: https://land.copernicus.eu/imagery-in-situ/eu-dem
+- NASA SRTM: https://www.earthdata.nasa.gov/
+- USGS Earth Explorer: https://earthexplorer.usgs.gov/
+
+**Configuration:**
+
+On first launch, TerraLab displays the **TerrainConfigDialog**:
+1. Click "Browse" and select your GeoTIFF or tiles directory
+2. Path is saved to `~/.terralab_config.json`
+3. Reopen dialog from settings menu to change
+
+**Technical Notes:**
+- TerraLab uses windowed reading for large files
+- Data loaded into RAM for region of interest only
+- Coordinate transformations handled automatically
+
+**Implementation:** `TiffRasterWindowProvider` in `terrain/providers.py:137-319`
+
+### Coordinate System Handling
+
+TerraLab internally uses UTM Zone 31N (EPSG:25831 / EPSG:32631) for metric calculations:
+
+**For Geographic GeoTIFFs (EPSG:4326):**
+- Lat/Lon converted to UTM meters using WGS84 ellipsoid formulas
+- Local flat-earth approximation for small regions
+- Meters-per-degree scaling: ~111,320 m/deg latitude
+- Longitude scaling: `111,320 × cos(latitude)` m/deg
+
+**For Projected GeoTIFFs:**
+- Native CRS detected via rasterio
+- Automatic transformation between UTM and native CRS
+- Uses rasterio.warp.transform for accuracy
+
+**Source:** `terrain/providers.py:32-76` and `196-232`
+
+## 2. Light Pollution Data (DVNL)
+
+**Dataset:** Day/Night Visible Lights (DVNL) 2022
+
+**Provider:** Earth Observation Group (NOAA/Payne Institute)
+
+**Specifications:**
+- Format: GeoTIFF
+- Coordinate System: Equal-area projection (typically EPSG:8857)
+- Units: Radiance (nW/cm²/sr)
+- Resolution: ~500m globally
+- Temporal: Annual composite
+- File Size: ~2-5 GB (global) or ~200-500 MB (regional)
+
+**Where to Obtain:**
+- Official source: https://eogdata.mines.edu/products/vnl/
+- Select "VIIRS Night Lights - Annual VNL V2"
+- Download the most recent year (e.g., 2022)
+- Choose the "vcm-orm-ntl" (cloud-masked, outlier-removed) product
+
+**File Naming:**
+```
+C_DVNL 2022.tif
+```
+
+Place in `TerraLab/data/light_pollution/`
+
+**Processing Pipeline:**
+
+1. **Convolution** (optional preprocessing):
+   - Gaussian kernel (σ = 1.5 km) simulates light scatter
+   - Script: `scripts/dvnl_convolve.py`
+   - Creates `*_convolved.tif`
+
+2. **SQM Calibration**:
+   - Converts radiance → Sky Quality Meter reading
+   - Formula: `SQM = 22.0 - 2.4 × log₁₀(radiance + 0.001)`
+   - Script: `scripts/calibrate_sqm.py`
+
+3. **Bortle Mapping**:
+   - Converts SQM → Bortle class (1-9)
+   - Thresholds defined in `light_pollution/bortle.py`
+
+**Implementation:** `light_pollution/dvnl_io.py` and `terrain/light_pollution_sampler.py`
+
+### Bortle Class Thresholds
+
+| Bortle | SQM Range | Sky Description | Typical Location |
+|--------|-----------|-----------------|------------------|
+| 1 | > 21.89 | Excellent dark sky | Remote mountains |
+| 2 | 21.69-21.89 | Typical dark sky | Rural areas |
+| 3 | 21.49-21.69 | Rural sky | Villages |
+| 4 | 20.49-21.49 | Rural/suburban | Town outskirts |
+| 5 | 19.50-20.49 | Suburban | Residential areas |
+| 6 | 18.94-19.50 | Bright suburban | City edge |
+| 7 | 18.38-18.94 | Suburban/urban | Inner suburbs |
+| 8 | 18.00-18.38 | City sky | City center |
+| 9 | < 18.00 | Inner city | Industrial zones |
+
+**Source:** `light_pollution/bortle.py`
+
+## 3. Gaia Star Catalog
+
+**Dataset:** Gaia DR3 (Data Release 3) subset
+
+**Provider:** European Space Agency (ESA) Gaia Mission
+
+**Specifications:**
+- Format: JSON (list of arrays) or dict format
+- Fields required:
+  - `source_id` or `id`: Unique star identifier
+  - `ra`: Right Ascension (degrees, ICRS)
+  - `dec`: Declination (degrees, ICRS)
+  - `phot_g_mean_mag` or `mag`: G-band magnitude
+  - `bp_rp`: Color index (B_P - R_P)
+  - `designation` or `name`: Star name (optional)
+- Typical size: 10,000 to 500,000 stars
+- Magnitude range: Typically mag < 7.5 for visual use
+
+**Where to Obtain:**
+
+**Option 1: Gaia Archive (Custom Query)**
+- URL: https://gea.esac.esa.int/archive/
+- Use ADQL query language
+- Example query for bright stars:
+
+```sql
+SELECT source_id, ra, dec, phot_g_mean_mag, bp_rp, designation
+FROM gaiadr3.gaia_source
+WHERE phot_g_mean_mag < 7.5
+  AND ra BETWEEN 0 AND 360
+  AND dec BETWEEN -30 AND 60
+```
+
+- Export as CSV, convert to JSON
+
+**Option 2: Pre-filtered Catalog**
+- Many astronomy projects provide Gaia subsets
+- Check for "visual observing" or "planetarium" catalogs
+- Ensure magnitude limit appropriate for your needs
+
+**File Format Example:**
+
+```json
+{
+  "data": [
+    ["1234567890", "Sirius", 101.287, -16.716, -1.46, -0.05],
+    ["9876543210", "Betelgeuse", 88.793, 7.407, 0.42, 1.85],
+    ...
+  ]
+}
+```
+
+Array format: `[id, name, ra, dec, mag, bp_rp]`
+
+Alternatively, dict format:
+
+```json
+[
+  {
+    "source_id": "1234567890",
+    "designation": "Sirius",
+    "ra": 101.287,
+    "dec": -16.716,
+    "phot_g_mean_mag": -1.46,
+    "bp_rp": -0.05
+  },
+  ...
+]
+```
+
+**File Location:**
+```
+TerraLab/data/stars/gaia_stars.json
+```
+
+**Binary Cache:**
+
+TerraLab automatically creates `.npy` cache files on first load:
+- `gaia_cache_ra.npy`
+- `gaia_cache_dec.npy`
+- `gaia_cache_mag.npy`
+- `gaia_cache_r.npy`, `gaia_cache_g.npy`, `gaia_cache_b.npy` (computed colors)
+- `gaia_cache_ids.npy`
+- `gaia_cache_names.npy`
+- `gaia_cache_bprp.npy`
+
+Cache files enable ~10-50× faster loading on subsequent launches.
+
+**Implementation:** `CatalogLoaderWorker` in `sky_widget.py:604-772`
+
+### Color Calculation
+
+Star RGB colors computed from B_P - R_P index:
+
+| bp_rp Range | Color | RGB |
+|-------------|-------|-----|
+| < 0.0 | Hot blue | (160, 190, 255) |
+| 0.0 - 0.5 | Blue-white | Interpolated |
+| 0.5 - 1.0 | White | (255, 255, 200-255) |
+| 1.0 - 2.0 | Yellow-orange | (255, 175-255, 100-200) |
+| > 2.0 | Red-orange | (255, 175, 100) |
+
+**Source:** `sky_widget.py:730-742`
+
+## 4. DE421 Ephemeris
+
+**Dataset:** JPL Development Ephemeris 421 (DE421)
+
+**Provider:** NASA Jet Propulsion Laboratory (JPL)
+
+**Specifications:**
+- Format: SPICE Binary Kernel (.bsp)
+- Coverage: 1900 to 2050
+- Bodies included:
+  - Sun, Moon, Mercury, Venus, Mars
+  - Jupiter, Saturn, Uranus, Neptune, Pluto
+  - Earth-Moon barycenter
+- Coordinate system: ICRF/J2000
+- File size: ~17 MB
+
+**Where to Obtain:**
+
+**Official NASA Source:**
+- URL: https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/
+- Direct file: `de421.bsp`
+- wget command:
+
+```bash
+wget https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de421.bsp
+```
+
+**Via Skyfield (Automatic):**
+
+Skyfield can auto-download:
+
+```python
+from skyfield.api import load
+eph = load('de421.bsp')  # Downloads if not present
+```
+
+**File Location:**
+```
+TerraLab/data/stars/de421.bsp
+```
+
+**Usage in TerraLab:**
+
+Loaded by `SkyfieldLoaderWorker`:
+```python
+ts = load.timescale()
+eph = load('de421.bsp')
+earth = eph['earth']
+moon = eph['moon']
+sun = eph['sun']
+```
+
+**Implementation:** `sky_widget.py:775-790`
+
+### Alternatives
+
+**DE430 / DE440:**
+- More accurate, larger files (100+ MB)
+- Extended coverage (1550-2650 for DE440)
+- Use if precision critical or observing distant dates
+
+**DE405:**
+- Older, smaller (6 MB)
+- Coverage: 1600-2200
+- Adequate for most visual observing
+
+## Configuration File
+
+TerraLab stores configuration in:
+```
+~/.terralab_config.json
+```
+
+**Key Settings:**
+
+```json
+{
+  "raster_path": "/path/to/dem/tiles/",
+  "horizon_quality": 20,
+  "last_location_lat": 41.3874,
+  "last_location_lon": 2.1686,
+  "bortle_manual": 4,
+  "auto_bortle": true,
+  "copernicus_api_key": "your-api-key",
+  "copernicus_api_url": "https://cds.climate.copernicus.eu/api"
+}
+```
+
+**API:**
+- `get_config_value(key, default)`
+- `set_config_value(key, value)`
+- Auto-saves on every write
+
+**Source:** `common/utils.py` and `config.py`
+
+## Data Loading Process
+
+### Startup Sequence
+
+1. **Configuration Check** (`__main__.py:38-49`):
+   - Load config from `~/.terralab_config.json`
+   - If `raster_path` missing or invalid, show `TerrainConfigDialog`
+   - User selects DEM source
+
+2. **Catalog Loading** (background thread):
+   - `CatalogLoaderWorker` loads Gaia JSON
+   - Builds NumPy arrays for vectorized rendering
+   - Creates binary cache if not present
+   - Emits `catalog_ready` signal
+
+3. **Ephemeris Loading** (background thread):
+   - `SkyfieldLoaderWorker` loads DE421
+   - Initializes timescale
+   - Emits `skyfield_ready` signal
+
+4. **First Render**:
+   - Sky canvas renders with available stars
+   - Horizon profile computed on-demand when location set
+
+### Horizon Baking
+
+When location is set or changed:
+
+1. **Region Preparation**:
+   - Calculate bounding box: `[lat-radius, lon-radius, lat+radius, lon+radius]`
+   - Load DEM tiles or GeoTIFF window into memory
+   - Show progress: "⏳ Loading maps: X/Y (Z%)"
+
+2. **Raycasting**:
+   - Cast rays in 360° sweep (default 720 rays, 0.5° spacing)
+   - Depth bands: 10-60 bands (quality setting)
+   - Apply Earth curvature correction
+   - Sample light pollution at ray-terrain intersections
+
+3. **Profile Caching**:
+   - Save to `.npz` file in cache directory
+   - Keyed by: `lat_lon_quality_hash`
+   - Automatic reload on next session
+
+**Source:** `terrain/worker.py` and `terrain/engine.py`
+
+## Data Updates and Maintenance
+
+### When to Update
+
+**Gaia Catalog:**
+- New data releases every ~18-24 months
+- Update if working with precision astrometry
+- Visual users: Update optional
+
+**DVNL Light Pollution:**
+- Annual releases (e.g., 2021, 2022, 2023)
+- Update yearly to track urban light growth
+- Critical for accurate Bortle classification
+
+**DEM Tiles:**
+- Update when new LiDAR surveys published
+- ICGC updates Catalonia DEM periodically
+- Important for mountainous regions with new infrastructure
+
+**DE421 Ephemeris:**
+- Valid until 2050
+- Update only if:
+  - Working beyond 2050
+  - Requiring higher precision (switch to DE440)
+  - Studying historical dates before 1900
+
+### Verifying Data Integrity
+
+**Check File Sizes:**
+- `gaia_stars.json`: 5 MB - 50 MB (depends on star count)
+- `de421.bsp`: ~17 MB
+- `C_DVNL 2022.tif`: 200 MB - 5 GB
+- DEM tiles: Varies widely
+
+**Test Loading:**
+
+Run TerraLab with verbose output:
+```bash
+python -m TerraLab 2>&1 | grep -E "(Loaded|Error|Warning)"
+```
+
+Look for:
+- `[CatalogLoader] Loaded N stars`
+- `[SkyfieldLoader] Initialized`
+- `[TiffRasterWindowProvider] Opening dataset`
+- No error messages
+
+## Troubleshooting
+
+### "Catalog not found" Error
+
+**Problem:** `gaia_stars.json` missing or malformed
+
+**Solution:**
+1. Verify file exists: `ls TerraLab/data/stars/gaia_stars.json`
+2. Check JSON syntax: `python -m json.tool < gaia_stars.json`
+3. Fallback: TerraLab generates 500 random stars for testing
+
+### "GeoTIFF not found" Error
+
+**Problem:** DEM path incorrect in config
+
+**Solution:**
+1. Open terrain config dialog (Settings menu)
+2. Browse to correct path
+3. Verify path exists: `ls -lh /path/to/dem.tif`
+
+### "Rasterio error" on GeoTIFF
+
+**Problem:** Corrupt or unsupported GeoTIFF format
+
+**Solution:**
+1. Verify with gdalinfo: `gdalinfo dem.tif`
+2. Check for compression: COG preferred
+3. Re-download if corrupted
+4. Convert with: `gdal_translate -co COMPRESS=LZW input.tif output.tif`
+
+### Slow Star Catalog Loading
+
+**Problem:** Large JSON file (> 100,000 stars)
+
+**Solution:**
+1. Wait for first load (creates NPY cache)
+2. Subsequent loads will be ~10× faster
+3. Consider reducing catalog size (mag < 7.0 sufficient for visual)
+
+### Missing Light Pollution Data
+
+**Problem:** Bortle classification fails
+
+**Solution:**
+1. Check `TerraLab/data/light_pollution/` exists
+2. Verify `C_DVNL 2022.tif` present
+3. Manual Bortle mode: Disable "Auto Bortle" in settings
+4. Set manual Bortle class (1-9)
+
+## Advanced: Custom Data Pipelines
+
+### Creating Custom Star Catalogs
+
+Merge multiple catalogs:
+
+```python
+import json
+
+# Load Gaia bright stars
+with open('gaia_bright.json') as f:
+    gaia = json.load(f)['data']
+
+# Add Messier objects manually
+messier = [
+    ["M31", "Andromeda Galaxy", 10.685, 41.269, 3.4, 0.5],
+    # ... more objects
+]
+
+combined = gaia + messier
+with open('TerraLab/data/stars/gaia_stars.json', 'w') as f:
+    json.dump({'data': combined}, f)
+```
+
+### Preprocessing DVNL for Performance
+
+Convolve and clip to region:
+
+```bash
+# Run TerraLab convolution script
+python scripts/dvnl_convolve.py \
+  --input C_DVNL_2022.tif \
+  --output europe_convolved.tif \
+  --sigma 1.5
+
+# Clip to bounding box (faster loading)
+gdal_translate -projwin lon_min lat_max lon_max lat_min \
+  europe_convolved.tif region_lp.tif
+```
+
+**Use clipped file:**
+```python
+set_config_value('light_pollution_path', 'data/light_pollution/region_lp.tif')
+```
+
+## Data Licensing and Attribution
+
+**Gaia Data:**
+- License: CC BY-SA 3.0 IGO
+- Attribution: "This work has made use of data from the European Space Agency (ESA) mission Gaia."
+
+**DVNL Data:**
+- License: Public domain (U.S. Government work)
+- Attribution: "Earth Observation Group, Payne Institute, Colorado School of Mines."
+
+**DEM Data (ICGC):**
+- License: CC BY 4.0
+- Attribution: "Institut Cartogràfic i Geològic de Catalunya (ICGC)"
+
+**DEM Data (Copernicus):**
+- License: Free and open access
+- Attribution: "Copernicus Land Monitoring Service, European Environment Agency."
+
+**DE421 Ephemeris:**
+- License: Public domain (NASA/JPL)
+- Attribution: "Jet Propulsion Laboratory, California Institute of Technology."
+
+**Full Attribution in README:** See `README.md:78-87` for complete credits.

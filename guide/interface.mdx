@@ -1,0 +1,163 @@
+---
+title: Interface Overview
+description: TerraLab PyQt5 interface, main controls, navigation, and HUD elements
+---
+
+# Interface Overview
+
+TerraLab features a PyQt5-based astronomical visualization interface that combines terrain analysis with celestial mechanics. The interface provides real-time sky rendering with topographic horizon profiles and light pollution modeling.
+
+## Main Window
+
+The application launches in a standalone window (1024×768 default) that can be toggled to fullscreen mode:
+
+- **F11**: Toggle fullscreen mode
+- **Escape**: Exit telescope mode or cancel measurement tools
+
+## Primary Controls
+
+### Time Controls
+
+The **RusticTimeBar** displays a 24-hour timeline with color-coded twilight zones:
+
+- **Interactive Timeline**: Click or drag on the timeline to set the time of day
+- **Color Coding**:
+  - Deep night (< -18° altitude): Dark blue (#0A0A19)
+  - Astronomical twilight (-18° to -12°): Purple (#14192D)
+  - Nautical twilight (-12° to -6°): Blue-purple (#32284B)
+  - Civil twilight (-6° to 0°): Golden-brown (#50321E)
+  - Golden hour (0° to 6°): Orange (#FF7828)
+  - Daytime (> 6°): Blue (#3296FF)
+- **Hour Markers**: 0h, 6h, 12h, 18h, 24h with tick marks
+- **Current Time Display**: Shows HH:MM next to the indicator line
+
+### View Navigation
+
+**Mouse Controls:**
+- **Left Click + Drag**: Pan the view (camera-like drag)
+- **Mouse Wheel**: Zoom in/out
+- **Right Click**: Context menu (where applicable)
+
+**Zoom Levels:**
+- Zoom is calculated to match human vision at 1.0x
+- FOV (Field of View) is displayed in degrees
+- Equivalent focal length shown in mm (based on 36mm full-frame sensor)
+
+### Sky Canvas Controls
+
+**Azimuth and Elevation:**
+- `azimuth_offset`: Horizontal viewing direction (0-360°)
+- `elevation_angle`: Vertical tilt angle
+- `vertical_ratio`: Vertical position offset
+
+**Keyboard Shortcuts:**
+- **Ctrl+L**: Log current positions (debug feature)
+- **Arrow Keys**: Navigate in telescope mode (when enabled)
+- **M**: Toggle movement speed in telescope mode (slow/fast)
+
+## HUD Elements
+
+### Zoom Hint Overlay
+
+When zooming, a toast-style overlay appears at the bottom center showing:
+- **FOV**: Current field of view in degrees
+- **Focal Length**: Equivalent lens focal length in mm
+
+Example: `FOV 45.0°  ·  50mm`
+
+The hint overlay:
+- Appears for 2 seconds after zoom change
+- Fades in/out smoothly (350ms animation)
+- Semi-transparent dark background (#0F0F1E with 210 alpha)
+- White text, medium weight, 11pt
+
+### Weather and Atmospheric Conditions
+
+TerraLab can display real-time atmospheric data when weather integration is enabled:
+
+- **Clouds**: Dynamic cloud rendering with configurable coverage and opacity
+- **Particles**: Precipitation effects (rain, snow)
+- **Atmospheric Extinction**: Airmass-based magnitude reduction
+
+### Telescope Mode HUD
+
+When telescope mode is active (see [Telescope Mode](/guide/telescope-mode)), dual-panel HUD displays:
+
+**Left Panel:**
+- FOV dimensions (circular or rectangular)
+- Movement speed (SLOW/FAST)
+- RA/Dec coordinates
+
+**Right Panel:**
+- Exit pupil (mm)
+- Airmass factor
+- Atmospheric extinction coefficient
+- Transmission percentage
+
+## Configuration Dialog
+
+### Terrain Configuration
+
+On first launch, if no DEM raster is configured, the **TerrainConfigDialog** appears:
+
+- **Raster Path**: Select DEM tiles directory or GeoTIFF file
+- **Horizon Quality**: Adjust raycasting density
+  - 10 bands: Low quality
+  - 20 bands: Normal (default)
+  - 40 bands: High quality
+  - 60 bands: Ultra quality
+
+### Light Pollution Settings
+
+- **Auto Bortle**: Automatically determine sky darkness from DVNL data
+- **Manual Mode**: Set Bortle class (1-9) manually
+- **Render Compensation**: Fine-tune magnitude limit for display
+
+## Status Indicators
+
+### Loading States
+
+The application uses background workers for heavy operations:
+
+**Catalog Loader:**
+- Loads Gaia star catalog from JSON
+- Displays progress for large catalogs (> 10,000 stars)
+- Creates binary NPY cache for faster subsequent loads
+
+**Skyfield Loader:**
+- Loads DE421 ephemeris for solar system objects
+- Initializes timescale and ephemeris data
+
+**Horizon Baker:**
+- Computes 360° horizon profile
+- Shows progress: "⏳ Loading maps: {loaded}/{total} ({pct}%)"
+- Displays depth band processing status
+
+### Visual Feedback
+
+- **Crosshair**: Center reticle in telescope mode
+- **Measurement Handles**: Resize and rotation controls for measurement tools
+- **Selection Highlight**: Golden glow for selected measurement objects
+
+## Performance Settings
+
+**Star Rendering:**
+- Pure colors mode: Simplified rendering (faster)
+- Realistic optics: Bloom, halos, diffraction spikes (slower but more accurate)
+- Magnitude limit: Controls visible star count
+- Star scale: Adjusts apparent star size
+
+**Trails Mode:**
+- High quality: Dense sampling, faint stars
+- Moving quality: Reduced sampling for real-time updates
+- Step density configurable (steps per hour)
+
+## Customization
+
+The interface uses translation support via `getTraduction()` for internationalization:
+
+- Default language: Catalan
+- Fallback: Spanish/English strings embedded in code
+- UI strings defined in source: `TerraLab/common/utils.py`
+
+All color schemes, fonts, and layout parameters can be adjusted in the respective widget source files under `TerraLab/widgets/`.

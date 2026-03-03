@@ -1,0 +1,104 @@
+---
+title: Introduction
+description: TerraLab is an advanced astronomical visualization and terrain analysis engine that combines real topographic data with precision celestial mechanics
+---
+
+# Welcome to TerraLab
+
+TerraLab is an astrophysical mapping engine that unites **terrestrial topography** with **precision astronomical rendering**. Unlike conventional planetariums, TerraLab calculates the **real horizon** based on Digital Elevation Models (DEM) and estimates **dynamic stellar visibility** using satellite light pollution data (DVNL).
+
+## What TerraLab Does
+
+TerraLab doesn't just draw stars—it calculates **what you can actually see** from an exact point on Earth, considering:
+
+<CardGroup cols={3}>
+  <Card title="Real Terrain Horizons" icon="mountain">
+    Generates 360° horizon profiles via raycasting over topographic meshes (ICGC/Copernicus DEM)
+  </Card>
+  
+  <Card title="Light Pollution Analysis" icon="lightbulb">
+    Scans Day/Night Visible Lights satellite data to assign Bortle class and real stellar magnitude limits
+  </Card>
+  
+  <Card title="Precision Celestial Mechanics" icon="star">
+    Integrates Gaia star catalog and DE421 ephemerides for sub-arcsecond positioning accuracy
+  </Card>
+</CardGroup>
+
+## Core Features
+
+### Horizon Engine (Raycasting)
+
+The `HorizonBaker` projects thousands of rays from the observer's position toward the horizon:
+
+- **Depth Bands**: Uses logarithmically distributed depth bands to avoid aliasing and enable realistic atmospheric gradients between near and distant mountains
+- **Earth Curvature Correction**: Each ray applies curvature correction for mountains beyond 100km: $h_{corr} = \frac{d^2}{2R_{earth}}$
+- **Multi-Quality Modes**: 10 to 80 depth bands for performance vs. quality trade-offs
+
+### Visibility Model (DVNL → SQM → Bortle)
+
+Converts satellite radiance into human-detectable sky quality:
+
+1. **Gaussian Convolution** with $\sigma=1.5km$ to simulate zenith light reaching an SQM (Sky Quality Meter)
+2. **Empirical Formula**: $SQM = 22.0 - 2.4 \cdot \log_{10}(Radiance_{DVNL} + 0.001)$
+3. **Bortle Classification**: Industrial zones reach Bortle 9, while mountain peaks achieve Bortle 1 ($SQM \approx 21.9$)
+
+### Star Catalog Integration
+
+- **Gaia Mission Data**: High-precision stellar positions, proper motions, and photometry
+- **DE421 Ephemerides**: NASA/JPL planetary positions for solar system objects
+- **Visual Magnitude Engine**: Dynamic magnitude limits based on local light pollution
+
+## Quick Links
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install TerraLab and download required data files
+  </Card>
+  
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get up and running with your first astronomical visualization
+  </Card>
+</CardGroup>
+
+## Technical Philosophy
+
+<Note>
+**Design Decisions:**
+- **Python + PyQt5**: Chosen for rapid iteration and NumPy's vectorized celestial calculations
+- **CRS Awareness**: Engine handles metric projections (EPSG:8857) for precise geographic coordinates
+- **Human Eye Focal Length**: Calibrated projection where zoom=1.0 corresponds to actual human vision (36mm full-frame equivalent)
+</Note>
+
+## Data Sources
+
+TerraLab builds on world-class scientific datasets:
+
+| Data Type | Source | Description |
+|-----------|--------|-------------|
+| **Topography** | ICGC, Copernicus (ESA) | Digital elevation models for terrain analysis |
+| **Stars** | Gaia Mission (ESA) | Precise stellar positions and photometry |
+| **Ephemerides** | NASA/JPL | DE421 planetary and lunar positions |
+| **Light Pollution** | Earth Observation Group | DVNL satellite radiance measurements |
+
+## Next Steps
+
+Ready to start exploring the night sky with real terrain?
+
+<Steps>
+  <Step title="Install Dependencies">
+    Follow the [installation guide](/installation) to set up Python packages
+  </Step>
+  
+  <Step title="Download Data Files">
+    Obtain Gaia catalog, DE421 ephemerides, and DVNL light pollution maps
+  </Step>
+  
+  <Step title="Configure Terrain">
+    Point TerraLab to your DEM raster files for accurate horizon calculation
+  </Step>
+  
+  <Step title="Launch Application">
+    Run `python -m TerraLab` and start exploring
+  </Step>
+</Steps>

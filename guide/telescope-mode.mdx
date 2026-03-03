@@ -1,0 +1,307 @@
+---
+title: Telescope Mode
+description: Telescope simulator features, FOV control, scope modes, and goto functionality
+---
+
+# Telescope Mode
+
+TerraLab includes a precision telescope simulator that overlays a field-of-view indicator on the sky canvas. This mode simulates telescope and camera sensor combinations to help plan observations and framing.
+
+## Activating Telescope Mode
+
+To enable telescope mode:
+
+1. Click the telescope mode button in the UI
+2. The screen will darken with a semi-transparent overlay
+3. Click on the sky to set the center of your telescope's view
+
+**Keyboard Shortcut:**
+- **Escape**: Exit telescope mode and return to normal view
+
+## FOV Shapes
+
+TerraLab supports two FOV indicator shapes:
+
+### Circle Mode
+
+Simulates a circular eyepiece field of view or circular sensor crop:
+- Diameter calculated from the smaller dimension (min of width/height)
+- Smooth boundary using 180+ interpolation points for accurate spherical rendering
+- Ideal for visual observers
+
+### Rectangle Mode
+
+Simulates a camera sensor or rectangular eyepiece:
+- Aspect ratio matches sensor dimensions
+- Corners use spherical arc interpolation (36 points per edge)
+- Supports rotation for framing flexibility
+
+## FOV Calculation
+
+The field of view is computed using standard optical formulas:
+
+### Sensor-Based FOV
+
+```
+FOV_width = 2 × arctan(sensor_width / (2 × focal_length))
+FOV_height = 2 × arctan(sensor_height / (2 × focal_length))
+```
+
+**Sensor Presets** (defined in `telescope_scope_mode.py:27-32`):
+
+| Preset | Width (mm) | Height (mm) | Typical Use |
+|--------|------------|-------------|-------------|
+| tiny | 5.37 | 4.04 | 1/2.8" sensor (smartphone/compact) |
+| aps_c | 23.6 | 15.7 | APS-C DSLR/mirrorless |
+| full_frame | 36.0 | 24.0 | Full-frame camera |
+
+### Manual FOV Override
+
+You can set custom FOV dimensions directly:
+- `set_manual_fov(width_deg, height_deg)`: Specify exact angular dimensions
+- `clear_manual_fov()`: Return to sensor-based calculation
+- Useful for eyepieces with specified AFOV ratings
+
+### Aspect Ratio Override
+
+For rectangle mode, you can force a specific aspect ratio:
+- `set_aspect_ratio(ratio)`: Sets width/height ratio (0.2 to 5.0)
+- Useful for cropped sensors or special formats
+
+## Telescope Parameters
+
+### Focal Length
+
+- **Range**: 1mm to infinity
+- **Default**: 250mm
+- Controls magnification and field of view
+- `set_focal_mm(focal_mm)`: Update telescope focal length
+
+### Sensor Selection
+
+- `set_sensor_key(key)`: Choose from presets ("tiny", "aps_c", "full_frame")
+- Automatically calculates FOV based on focal length
+
+## Navigation and Movement
+
+### Movement Modes
+
+Two speed modes are available:
+
+**Slow Mode** (default):
+- Step size: 0.05 arcminutes (3 arcseconds)
+- Hold rate: 0.5 arcminutes per second
+- For fine adjustments and high-magnification work
+
+**Fast Mode**:
+- Step size: 0.05 degrees (3 arcminutes)
+- Hold rate: 0.5 degrees per second
+- For slewing and coarse positioning
+
+**Toggle Speed:** Press **M** key while in telescope mode
+
+### Keyboard Navigation
+
+When telescope mode is active, arrow keys control the view:
+
+- **Up Arrow**: Nudge altitude up
+- **Down Arrow**: Nudge altitude down
+- **Left Arrow**: Nudge azimuth left
+- **Right Arrow**: Nudge azimuth right
+
+**Behavior:**
+- Single tap: Discrete step (based on current speed mode)
+- Hold key: Continuous movement at configured hold rate
+- Movement rate calculated in `telescope_scope_mode.py:122-126`
+
+### Mouse Navigation
+
+**Click-to-Center:**
+- Click anywhere on the sky to instantly center the FOV indicator
+- Uses `screen_to_sky()` projection to convert screen coordinates to celestial coordinates
+
+**Drag Mode:**
+- Click and hold inside the FOV indicator
+- Drag to pan the view (camera-like inverse motion)
+- Precise for small adjustments
+
+### Goto Functionality
+
+Programmatic centering is available via:
+
+```python
+set_center(sky_coord)  # sky_coord = (alt_deg, az_deg)
+```
+
+- Normalizes altitude to [-89.9°, 89.9°] to avoid pole singularities
+- Normalizes azimuth to [0°, 360°)
+- Cancels "awaiting click" state
+
+## Visual Rendering
+
+### Dark Overlay
+
+The area outside the FOV indicator is shaded with:
+- Semi-transparent black overlay (190 alpha)
+- Creates "tunnel vision" effect
+- Interior remains fully clear for unobstructed view
+
+### Boundary Rendering
+
+FOV boundary features:
+- Subtle white glow (35 alpha, 1.2px width)
+- Bright white edge (120 alpha, 0.8px width)
+- Anti-aliased for smooth appearance
+
+### Crosshair
+
+Center of FOV marked with:
+- 8-pixel arm length cross
+- Dual-layer rendering (glow + bright core)
+- White dot at exact center (1.2px radius)
+
+## HUD Information
+
+The telescope HUD displays in dual side panels:
+
+### Left Panel (Core Scope Info)
+
+**Circle Mode:**
+```
+FOV: 1.234° (74.0')  |  Movement: SLOW (M)
+```
+
+**Rectangle Mode:**
+```
+FOV: 2.100° x 1.400°  |  Movement: FAST (M)
+```
+
+Additional line shows RA/Dec if celestial coordinate tracking is enabled.
+
+### Right Panel (Optical Telemetry)
+
+Displays atmospheric and optical metrics:
+- Exit pupil diameter (mm) - computed from aperture and magnification
+- Airmass factor (X) - atmospheric path length multiplier
+- Extinction coefficient (k) - magnitude loss per airmass
+- Atmospheric transmission (%) - light reaching the telescope
+
+Example:
+```
+Exit Pupil: 2.4mm
+Airmass: 1.15X
+Extinction: 0.18 mag/X
+Transmission: 94.2%
+```
+
+### HUD Positioning
+
+- Panels positioned at vertical center of FOV indicator
+- Left panel: 12px from left edge
+- Right panel: 12px from right edge
+- Clamped to viewport bounds to prevent off-screen rendering
+- Compact sizing based on actual text width (max 360px)
+
+## Atmospheric Calculations
+
+Telescope mode integrates with TerraLab's atmospheric model:
+
+### Airmass
+
+Computed from altitude angle using:
+```python
+airmass = airmass_from_altitude_deg(h_deg)
+```
+
+Based on Rozenberg 1966 formula for atmospheric path length.
+
+### Extinction Coefficient
+
+When weather mode is enabled:
+- Fetches real-time AOD (Aerosol Optical Depth) from Copernicus CAMS
+- Fetches surface pressure data
+- Computes k-extinction: `extinction_k_mag_per_airmass(aod, pressure_hpa)`
+- Falls back to k=0.20 if data unavailable
+
+**Data Source:** `telescope_runtime.py:258-273`
+
+### Magnitude Loss
+
+Atmospheric attenuation calculated as:
+```
+loss_mag = k_extinction × (airmass - 1.0)
+```
+
+This reduces the limiting magnitude for stars viewed at lower altitudes.
+
+### Transmission
+
+Percentage of light transmitted through atmosphere:
+```
+transmission = 10^(-0.4 × loss_mag)
+```
+
+## Exit Pupil Calculation
+
+For visual observing (not camera mode):
+
+```python
+magnification = telescope_focal_mm / eyepiece_focal_mm
+exit_pupil = aperture_mm / magnification
+```
+
+**Optimal Range:** 0.5mm to 7mm
+- Below 0.5mm: Diffraction-limited resolution
+- Above 7mm: Wasted light (exceeds dark-adapted pupil)
+
+**Source:** `telescope_runtime.py:332-344`
+
+## Integration with Star Rendering
+
+Telescope mode modifies the magnitude rendering system:
+
+### Scope Magnitude Limit
+
+```python
+scope_mlim = general_mlim + 5×log10(aperture_mm/pupil_mm)
+```
+
+Where:
+- `general_mlim`: Naked-eye limiting magnitude from Bortle class
+- Aperture advantage increases magnitude reach
+- Computed in `telescope_runtime.py:452-478`
+
+### Active Scope Rendering
+
+When `scope_enabled=True`:
+- Star magnitude limit switches to `scope_mlim`
+- Only stars within FOV boundary rendered at enhanced brightness
+- Background stars dimmed by overlay
+
+## Implementation Details
+
+### Controller State
+
+The `TelescopeScopeController` class maintains:
+- `enabled`: Boolean flag for active state
+- `awaiting_center_click`: True until first click placement
+- `shape`: "circle" or "rectangle"
+- `speed_mode`: "slow" or "fast"
+- `center`: (alt, az) tuple for current pointing
+- `dragging`: Boolean for mouse drag state
+
+**Source:** `telescope_scope_mode.py:47-59`
+
+### Projection
+
+FOV boundary points projected using:
+- `destination_point(center, bearing, radius)`: Spherical geometry
+- `slerp_arc_points(p0, p1, n)`: Great circle arc interpolation
+- Stereographic projection to screen coordinates
+
+### Coordinate Systems
+
+- **Sky Coords**: (altitude_deg, azimuth_deg) in horizontal coordinate system
+- **Screen Coords**: (x, y) in pixel coordinates
+- Conversion via `project_fn` and `unproject_fn` callbacks
+- Handles pole singularities and azimuth wrapping

@@ -1,0 +1,143 @@
+---
+title: "Propagation Kernels"
+description: "Distance-decay radial kernels for light propagation modeling"
+---
+
+## create_gaussian_kernel
+
+Creates a 2D Gaussian kernel for simulating the dispersion of light pollution.
+
+The kernel is defined by:
+
+```
+K(r) = exp(-r² / (2σ²))
+```
+
+where `r` is the distance from the center and `σ` is the standard deviation.
+
+```python
+def create_gaussian_kernel(
+    sigma_km: float,
+    max_radius_km: float,
+    res_km: float
+) -> np.ndarray
+```
+
+### Parameters
+
+<ParamField path="sigma_km" type="float" required>
+  The standard deviation of the Gaussian in kilometers
+</ParamField>
+
+<ParamField path="max_radius_km" type="float" required>
+  The cutoff radius in kilometers (kernel is set to 0 beyond this distance)
+</ParamField>
+
+<ParamField path="res_km" type="float" required>
+  The spatial resolution per pixel in kilometers
+</ParamField>
+
+### Returns
+
+<ResponseField name="kernel" type="np.ndarray">
+  A normalized 2D kernel array with shape `(2*halo+1, 2*halo+1)` where `halo = ceil(max_radius_km / res_km)`
+</ResponseField>
+
+### Example
+
+```python
+from light_pollution.kernels import create_gaussian_kernel
+
+# Create a Gaussian kernel with 50km spread
+kernel = create_gaussian_kernel(
+    sigma_km=50.0,
+    max_radius_km=150.0,
+    res_km=1.0
+)
+
+print(kernel.shape)  # (301, 301)
+print(kernel.sum())  # ~1.0 (normalized)
+```
+
+---
+
+## create_power_law_kernel
+
+Creates a 2D power-law kernel typical for atmospheric scattering.
+
+The kernel combines a power-law decay with exponential attenuation:
+
+```
+K(r) = (r₀ / (r + r₀))^p × exp(-r / λ)
+```
+
+where:
+- `r` is the distance from center
+- `p` is the power exponent
+- `r₀` is the regularization radius (prevents singularity at origin)
+- `λ` is the exponential decay length (extinction length)
+
+```python
+def create_power_law_kernel(
+    p: float,
+    r0_km: float,
+    lambda_km: float,
+    max_radius_km: float,
+    res_km: float
+) -> np.ndarray
+```
+
+### Parameters
+
+<ParamField path="p" type="float" required>
+  Power exponent controlling the rate of decay
+</ParamField>
+
+<ParamField path="r0_km" type="float" required>
+  Regularization radius at the origin in kilometers (prevents division by zero)
+</ParamField>
+
+<ParamField path="lambda_km" type="float" required>
+  Exponential decay factor in kilometers (like an extinction length). Set to 0 to disable exponential decay.
+</ParamField>
+
+<ParamField path="max_radius_km" type="float" required>
+  Cutoff radius in kilometers (kernel is set to 0 beyond this distance)
+</ParamField>
+
+<ParamField path="res_km" type="float" required>
+  Spatial resolution per pixel in kilometers
+</ParamField>
+
+### Returns
+
+<ResponseField name="kernel" type="np.ndarray">
+  A normalized 2D kernel array with shape `(2*halo+1, 2*halo+1)` where `halo = ceil(max_radius_km / res_km)`
+</ResponseField>
+
+### Example
+
+```python
+from light_pollution.kernels import create_power_law_kernel
+
+# Create a power-law kernel for atmospheric scattering
+kernel = create_power_law_kernel(
+    p=2.0,
+    r0_km=5.0,
+    lambda_km=100.0,
+    max_radius_km=200.0,
+    res_km=1.0
+)
+
+print(kernel.shape)  # (401, 401)
+print(kernel.sum())  # ~1.0 (normalized)
+
+# Power-law without exponential decay
+kernel_no_exp = create_power_law_kernel(
+    p=1.5,
+    r0_km=3.0,
+    lambda_km=0.0,  # Disable exponential decay
+    max_radius_km=150.0,
+    res_km=1.0
+)
+```

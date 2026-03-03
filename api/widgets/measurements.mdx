@@ -1,0 +1,411 @@
+---
+title: "MeasurementController"
+description: "Interactive measurement tools for angular distances and areas on the sky"
+---
+
+## Overview
+
+The `MeasurementController` class provides interactive measurement tools for the sky widget, including rulers, circles, squares, and rectangles. All measurements are spherically accurate using great-circle distances and geodesic arcs.
+
+## Class Definition
+
+```python
+from TerraLab.widgets.measurement_tools import (
+    MeasurementController,
+    MeasurementItem,
+    RenderInfo,
+    SkyCoord,
+    TOOL_NONE,
+    TOOL_RULER,
+    TOOL_SQUARE,
+    TOOL_RECTANGLE,
+    TOOL_CIRCLE,
+    DRAG_NONE,
+    DRAG_CREATING,
+    DRAG_MOVING,
+    DRAG_RESIZING,
+)
+```
+
+## Constants
+
+### Tool Types
+- `TOOL_NONE: str = "none"` - No active tool
+- `TOOL_RULER: str = "ruler"` - Angular distance measurement
+- `TOOL_SQUARE: str = "square"` - Square framing tool
+- `TOOL_RECTANGLE: str = "rectangle"` - Rectangular framing tool with rotation
+- `TOOL_CIRCLE: str = "circle"` - Circular framing tool
+
+### Drag Modes
+- `DRAG_NONE: str = "none"` - No drag operation
+- `DRAG_CREATING: str = "creating"` - Creating new measurement
+- `DRAG_MOVING: str = "moving"` - Moving existing measurement
+- `DRAG_RESIZING: str = "resizing"` - Resizing via handle
+
+## Type Definitions
+
+```python
+SkyCoord = Tuple[float, float]  # (alt_deg, az_deg)
+```
+Represents a sky coordinate in horizontal (alt-azimuth) system.
+
+## Dataclasses
+
+### MeasurementItem
+
+Represents a single measurement on the sky.
+
+```python
+@dataclass
+class MeasurementItem:
+    tool: str               # Tool type (TOOL_RULER, TOOL_CIRCLE, etc.)
+    a: SkyCoord            # First control point (alt, az)
+    b: SkyCoord            # Second control point (alt, az)
+    rotation_deg: float = 0.0  # Rectangle rotation in degrees (TOOL_RECTANGLE only)
+```
+
+**Attributes:**
+- `tool` (str) - Type of measurement tool
+- `a` (SkyCoord) - First defining point (ruler start, circle center, rectangle origin)
+- `b` (SkyCoord) - Second defining point (ruler end, circle edge, rectangle corner)
+- `rotation_deg` (float) - Local-frame rotation for rectangles (default: 0.0)
+
+---
+
+### RenderInfo
+
+Contains rendering information for a measurement item.
+
+```python
+@dataclass
+class RenderInfo:
+    paths: List[List[SkyCoord]]       # Paths to draw (geodesic arcs)
+    label: str                         # Measurement label text
+    anchor: SkyCoord                   # Label anchor position
+    handles: Dict[str, SkyCoord]       # Interactive handles {name: position}
+    hit_polygon: Optional[List[SkyCoord]] = None  # Hit test polygon for filled shapes
+```
+
+**Attributes:**
+- `paths` (List[List[SkyCoord]]) - Geodesic paths defining the shape boundary
+- `label` (str) - Formatted measurement text (e.g., "Distance: 12.345deg")
+- `anchor` (SkyCoord) - Position for label placement
+- `handles` (Dict[str, SkyCoord]) - Interactive resize/rotate handles
+- `hit_polygon` (Optional[List[SkyCoord]]) - Polygon for interior hit testing (circles and rectangles)
+
+---
+
+## MeasurementController
+
+### Constructor
+
+```python
+MeasurementController(
+    active_tool: str = TOOL_NONE,
+    current_start: Optional[SkyCoord] = None,
+    current_cursor: Optional[SkyCoord] = None,
+    ruler_first_point: Optional[SkyCoord] = None,
+    items: List[MeasurementItem] = field(default_factory=list),
+    selected_index: Optional[int] = None,
+    drag_mode: str = DRAG_NONE,
+    resize_handle: Optional[str] = None,
+    last_drag_sky: Optional[SkyCoord] = None,
+    handle_hit_px: float = 12.0,
+    shape_hit_px: float = 8.0
+)
+```
+
+Creates a new measurement controller (typically use default constructor with no arguments).
+
+### Attributes
+
+- `active_tool: str` - Currently active tool (default: TOOL_NONE)
+- `current_start: Optional[SkyCoord]` - Start point of measurement being created
+- `current_cursor: Optional[SkyCoord]` - Current cursor position during creation
+- `ruler_first_point: Optional[SkyCoord]` - First point for ruler (two-click mode)
+- `items: List[MeasurementItem]` - List of all measurements
+- `selected_index: Optional[int]` - Index of selected measurement
+- `drag_mode: str` - Current drag operation mode
+- `resize_handle: Optional[str]` - Name of handle being dragged
+- `last_drag_sky: Optional[SkyCoord]` - Last sky position during drag
+- `handle_hit_px: float` - Hit radius for handles in pixels (default: 12.0)
+- `shape_hit_px: float` - Hit distance for shape edges in pixels (default: 8.0)
+
+### Methods
+
+#### Tool Management
+
+```python
+set_tool(tool: str) -> None
+```
+Sets the active measurement tool.
+
+**Parameters:**
+- `tool` (str) - Tool constant (TOOL_NONE, TOOL_RULER, TOOL_CIRCLE, TOOL_SQUARE, TOOL_RECTANGLE)
+
+**Note:** Automatically calls cancel_current() to reset any in-progress measurement.
+
+---
+
+```python
+clear() -> None
+```
+Clears all measurements and resets controller state.
+
+---
+
+```python
+delete_selected() -> bool
+```
+Deletes the currently selected measurement.
+
+**Returns:**
+- bool - True if a measurement was deleted, False otherwise
+
+---
+
+```python
+cancel_current() -> None
+```
+Cancels current measurement creation or drag operation.
+
+**Note:** Preserves ruler_first_point if active_tool is TOOL_RULER.
+
+---
+
+```python
+has_active_interaction() -> bool
+```
+Checks if there's an active interaction (creation or drag).
+
+**Returns:**
+- bool - True if user is currently interacting with measurements
+
+---
+
+#### Mouse Event Handling
+
+```python
+on_mouse_press(
+    sx: float,
+    sy: float,
+    unproject_fn: Callable,
+    project_fn: Optional[Callable[[float, float], Optional[Tuple[float, float]]]] = None
+) -> bool
+```
+Handles mouse press events.
+
+**Parameters:**
+- `sx` (float) - Screen X coordinate
+- `sy` (float) - Screen Y coordinate
+- `unproject_fn` (Callable) - Function to convert screen coords to sky coords
+- `project_fn` (Optional[Callable]) - Function to project sky coords to screen (required for hit testing)
+
+**Returns:**
+- bool - True if event was consumed
+
+**Behavior:**
+- Checks for hits on existing measurements (handles first, then shapes)
+- If hit, selects item and starts drag (resize if handle, move if shape body)
+- If no hit, starts creating new measurement
+- Ruler uses two-click mode (first click sets start, second click completes)
+
+---
+
+```python
+on_mouse_move(
+    sx: float,
+    sy: float,
+    unproject_fn: Callable,
+    project_fn: Optional[Callable[[float, float], Optional[Tuple[float, float]]]] = None
+) -> bool
+```
+Handles mouse move events.
+
+**Parameters:**
+- `sx` (float) - Screen X coordinate
+- `sy` (float) - Screen Y coordinate
+- `unproject_fn` (Callable) - Function to convert screen coords to sky coords
+- `project_fn` (Optional[Callable]) - Function to project sky coords to screen
+
+**Returns:**
+- bool - True if event was consumed
+
+**Behavior:**
+- Updates preview during creation
+- Moves or resizes measurement during drag
+- Updates ruler preview between first and second click
+
+---
+
+```python
+on_mouse_release(
+    sx: float,
+    sy: float,
+    unproject_fn: Callable,
+    project_fn: Optional[Callable[[float, float], Optional[Tuple[float, float]]]] = None
+) -> bool
+```
+Handles mouse release events.
+
+**Parameters:**
+- `sx` (float) - Screen X coordinate
+- `sy` (float) - Screen Y coordinate
+- `unproject_fn` (Callable) - Function to convert screen coords to sky coords
+- `project_fn` (Optional[Callable]) - Function to project sky coords to screen
+
+**Returns:**
+- bool - True if event was consumed
+
+**Behavior:**
+- Finalizes measurement creation and adds to items list
+- Ends drag operation
+- Resets drag state
+
+---
+
+```python
+update_preview_cursor(sx: float, sy: float, unproject_fn: Callable) -> None
+```
+Updates cursor position for ruler preview (call during mouse move when not pressing).
+
+**Parameters:**
+- `sx` (float) - Screen X coordinate
+- `sy` (float) - Screen Y coordinate
+- `unproject_fn` (Callable) - Function to convert screen coords to sky coords
+
+---
+
+#### Rendering
+
+```python
+draw(
+    painter: QPainter,
+    project_fn: Callable[[float, float], Optional[Tuple[float, float]]],
+    formatters: Dict[str, Callable[[float], str]]
+) -> None
+```
+Draws all measurements and active previews.
+
+**Parameters:**
+- `painter` (QPainter) - Qt painter object
+- `project_fn` (Callable) - Function to project sky coords (alt, az) to screen coords (x, y)
+- `formatters` (Dict[str, Callable]) - Value formatters (currently unused, reserved for future)
+
+**Rendering Details:**
+- Draws all completed measurements
+- Draws preview for measurement being created
+- Highlights selected measurement with golden color
+- Shows interactive handles for selected measurement
+- Renders geodesic arcs (not straight lines) for spherical accuracy
+- Displays HUD labels with measurements
+
+---
+
+## Usage Example
+
+```python
+from TerraLab.widgets.measurement_tools import (
+    MeasurementController,
+    TOOL_RULER,
+    TOOL_CIRCLE,
+    TOOL_RECTANGLE,
+)
+from PyQt5.QtGui import QPainter
+
+# Create controller
+measure = MeasurementController()
+
+# Activate ruler tool
+measure.set_tool(TOOL_RULER)
+
+# Handle mouse events in widget
+def mousePressEvent(event):
+    sx, sy = event.x(), event.y()
+    consumed = measure.on_mouse_press(sx, sy, unproject_fn, project_fn)
+    if consumed:
+        update()
+
+def mouseMoveEvent(event):
+    sx, sy = event.x(), event.y()
+    consumed = measure.on_mouse_move(sx, sy, unproject_fn, project_fn)
+    if consumed:
+        update()
+
+def mouseReleaseEvent(event):
+    sx, sy = event.x(), event.y()
+    consumed = measure.on_mouse_release(sx, sy, unproject_fn, project_fn)
+    if consumed:
+        update()
+
+# Draw measurements
+def paintEvent(event):
+    painter = QPainter(widget)
+    # ... draw sky first ...
+    
+    measure.draw(painter, project_fn, formatters={})
+
+# Switch tools
+measure.set_tool(TOOL_CIRCLE)  # Now draw circles
+
+# Delete selected
+if measure.selected_index is not None:
+    measure.delete_selected()
+    update()
+
+# Clear all
+measure.clear()
+update()
+
+# Get measurements programmatically
+for item in measure.items:
+    if item.tool == TOOL_RULER:
+        from TerraLab.widgets.spherical_math import angular_distance
+        dist = angular_distance(item.a, item.b)
+        print(f"Ruler: {dist:.3f}° = {dist*60:.1f}'")
+    elif item.tool == TOOL_CIRCLE:
+        from TerraLab.widgets.spherical_math import angular_distance
+        r = angular_distance(item.a, item.b)
+        print(f"Circle: radius={r:.3f}°, diameter={2*r:.3f}°")
+```
+
+## Advanced Usage: Rectangle Rotation
+
+```python
+# Rectangle measurements support rotation
+measure.set_tool(TOOL_RECTANGLE)
+
+# After creating a rectangle, user can drag the "rotate" handle
+# The rotation_deg field stores the rotation angle
+
+for item in measure.items:
+    if item.tool == TOOL_RECTANGLE:
+        print(f"Rectangle rotation: {item.rotation_deg:.1f}°")
+```
+
+## Programmatic Measurement Creation
+
+```python
+from TerraLab.widgets.measurement_tools import MeasurementItem, TOOL_RULER
+
+# Create ruler from M42 to M45 (example coordinates)
+m42 = (-5.4, 124.5)  # Orion Nebula (alt, az)
+m45 = (30.2, 95.3)   # Pleiades (alt, az)
+
+ruler = MeasurementItem(tool=TOOL_RULER, a=m42, b=m45)
+measure.items.append(ruler)
+measure.selected_index = len(measure.items) - 1
+
+update()
+```
+
+## Integration Notes
+
+- All measurements use spherical geometry (great-circle distances, geodesic arcs)
+- Requires `unproject_fn` to convert screen → sky and `project_fn` for sky → screen
+- Uses functions from `spherical_math` module: `angular_distance()`, `destination_point()`, `slerp_arc_points()`, `angular_delta_signed()`
+- Rectangle areas use small-angle approximation (sufficient for typical FOV framing)
+- For large areas, consider implementing exact spherical cap area calculation
+- Handles are automatically drawn for selected measurements
+- HUD labels auto-size to fit content and use rounded dark backgrounds
+- Hit testing works on both shape edges (polyline distance) and filled interiors (point-in-polygon)

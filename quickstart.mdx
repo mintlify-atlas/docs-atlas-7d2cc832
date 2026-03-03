@@ -1,80 +1,442 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: 'Quickstart'
+description: 'Get started with TerraLab in minutes'
 ---
 
-## Get started in three steps
+TerraLab is an astronomical visualization tool that generates real horizon profiles from digital elevation models (DEMs) and simulates realistic night sky conditions with light pollution modeling.
 
-Get your documentation site running locally and make your first customization.
+## Launch TerraLab
 
-### Step 1: Set up your local environment
+There are three ways to launch TerraLab:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+<CodeGroup>
+
+```bash Python Module
+python -m TerraLab
+```
+
+```bash Command Line
+terralab
+```
+
+```python Programmatic
+from TerraLab.__main__ import main
+main()
+```
+
+</CodeGroup>
+
+The application window will open at 1024×768 resolution and supports F11 for fullscreen mode.
+
+## Initial Configuration
+
+<Steps>
+  <Step title="Configure Terrain Data">
+    On first launch, TerraLab will check for terrain configuration. If no DEM data is found, the **Terrain Config Dialog** will appear automatically.
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    <Note>
+    Without DEM data, TerraLab will use procedurally generated terrain as a fallback.
+    </Note>
+
+    ### Download DEM Data
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    The dialog provides download links for public DEM repositories:
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    - **ICGC (Catalonia)**: High-resolution elevation data for Catalonia
+    - **Copernicus (Europe)**: 25m resolution DEM covering all of Europe in 5×5 degree tiles
+    - **Other regions**: Check your national mapping agency (USGS, IGN, OS, BKG, etc.)
+    
+    <Warning>
+    Download at least 150km radius of coverage in tiled format (5×5° or similar) for best results.
+    </Warning>
+    
+    Supported formats: `.asc` (ESRI ASCII Grid), `.tif` (GeoTIFF)
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Select DEM Folder">
+    Click **"Seleccionar Carpeta DEM..."** to choose the folder containing your elevation files. The system will validate that the folder contains supported formats.
+    
+    Configuration is stored in `~/.terralab/config.json`
+  </Step>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Choose Horizon Quality">
+    Select your preferred horizon rendering quality preset:
+    
+    | Preset | Bands | Use Case |
+    |--------|-------|----------|
+    | Low | 10 | Fast preview, low-end hardware |
+    | Normal | 20 | Default balanced quality |
+    | High | 40 | Detailed horizon profiles |
+    | Ultra | 60 | Professional accuracy |
+    | Extreme | 80 | Maximum detail (slow initial generation) |
+    
+    <Note>
+    Quality affects the number of depth layers used for horizon calculation. Higher quality requires longer initial computation but provides better visual gradients.
+    </Note>
+    
+    The change applies on the next horizon regeneration (see `terrain_config_dialog.py:16-23`).
+  </Step>
 
-### Step 3: Go live
+  <Step title="Configure Light Pollution (Optional)">
+    TerraLab supports DVNL (Defense & Veterans Night Light) GeoTIFF data for realistic light pollution modeling.
+    
+    - Click the **"..."** button next to the DVNL field
+    - Select your `.tif` light pollution raster file
+    - If not configured, TerraLab uses an internal fallback model
+    
+    Light pollution intensity is automatically scaled based on Bortle class (see `terrain_config_dialog.py:122-136`).
+  </Step>
+</Steps>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+## Navigation Controls
 
-## Next steps
-
-Now that you have your docs running, explore these key features:
+### Mouse Controls
 
 <CardGroup cols={2}>
+  <Card title="Camera Rotation" icon="arrows-rotate">
+    **Left-click + Drag**: Rotate azimuth and elevation
+    - Horizontal drag: Change azimuth (view direction)
+    - Vertical drag: Change elevation (look up/down)
+    - Sensitivity: 0.5 degrees per pixel (see `sky_widget.py:5009`)
+  </Card>
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+  <Card title="Zoom" icon="magnifying-glass">
+    **Mouse Wheel**: Adjust field of view
+    - Scroll up: Zoom in (narrow FOV)
+    - Scroll down: Zoom out (wide FOV)
+    - Zoom range: 0.1× to 5.0×
+    - FOV calculation: `100° / zoom_level` (see `sky_widget.py:2441`)
+  </Card>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+  <Card title="Telescope Mode Drag" icon="crosshairs">
+    **Click + Drag** (in Telescope Mode): Pan the target reticle
+    - Movement inverts naturally (camera-like behavior)
+    - Hold **Ctrl + Drag** to move global camera instead
+    - See `sky_widget.py:4943-4958`
+  </Card>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Measurement Tools" icon="ruler">
+    **Click + Drag** (in Measurement Mode): Create shapes
+    - Click twice for ruler tool (distance measurement)
+    - Click-drag for circle, square, or rectangle
+    - **Ctrl + Drag**: Override to pan camera
+    - **Delete/Backspace**: Remove selected measurement
+  </Card>
 </CardGroup>
 
+### Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| **F11** | Toggle fullscreen |
+| **Esc** | Exit telescope/measurement mode |
+| **Arrow Keys** | Nudge telescope reticle (fine control) |
+| **M** | Toggle telescope movement speed (slow/fast) |
+| **Ctrl+L** | Log astronomical positions (debug) |
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+Arrow keys in telescope mode use discrete steps: 0.05 arcmin (slow) or 0.05° (fast). See `telescope_scope_mode.py:42-45`.
 </Note>
+
+## Location and Time Configuration
+
+TerraLab uses your system location and time by default, but you can override these settings in the main interface:
+
+- **Latitude/Longitude**: Set observer position (affects horizon calculation and celestial positions)
+- **Date/Time**: Adjust simulation time for planning observations
+- **Time Speed**: Control real-time simulation speed
+
+Real-time astronomical calculations use Skyfield with high-precision ephemeris data.
+
+## Real Horizon Generation
+
+Once DEM data is configured, TerraLab generates horizon profiles using raycasting with Earth curvature correction:
+
+<Steps>
+  <Step title="Trigger Generation">
+    The horizon is computed automatically when:
+    - DEM path is set for the first time
+    - Observer location changes significantly
+    - You manually click **"Regenerar"** (Regenerate)
+  </Step>
+
+  <Step title="Computation Process">
+    TerraLab performs multi-band raycasting:
+    
+    - Loads DEM tiles from cache (`.npy` format for speed)
+    - Computes 360° azimuth sweep at 0.5° intervals
+    - Calculates horizon angles for each quality band
+    - Applies Earth curvature correction using 6,371 km radius
+    - Maximum raycast distance: 150 km
+    
+    Band distribution uses logarithmic spacing:
+    - 2/3 of bands cover 0-5 km (near detail)
+    - 1/3 of bands cover 5-150 km (atmospheric haze)
+    
+    See `engine.py:23-118` for band generation logic.
+  </Step>
+
+  <Step title="Rendering">
+    The computed profile is rendered as:
+    - Multi-layer depth silhouettes with atmospheric perspective
+    - Distance-based color gradation (near→far: dark→haze blue)
+    - Blend with procedural terrain fallback for data gaps
+  </Step>
+</Steps>
+
+## Light Pollution Understanding
+
+TerraLab models light pollution impact on sky visibility:
+
+### Bortle Scale Integration
+
+The visual magnitude engine adjusts limiting magnitude based on the Bortle Dark Sky Scale (1-9):
+
+- **Class 1**: Pristine dark sky (mag ~7.8)
+- **Class 5**: Suburban sky (mag ~5.5)
+- **Class 9**: Inner city (mag ~4.0)
+
+### Horizon Extinction
+
+When DVNL data is configured, TerraLab calculates local horizon extinction from light domes:
+
+- Intensity factor: `(bortle - 1) / 8` scales dome contribution
+- Dynamic radius varies with distance to light source (up to 35 km influence)
+- Extinction penalty: up to 0.15 magnitude reduction per azimuth
+- See `sky_widget.py:1004-1022` for the algorithm
+
+<Warning>
+Light pollution effects compound: a Bortle 7 location with nearby city domes may reduce limiting magnitude by 2-3 magnitudes near the horizon.
+</Warning>
+
+## Measurement Tools
+
+Access measurement tools from the toolbar or keyboard shortcuts:
+
+### Ruler Tool
+Measures angular distance along a great circle arc:
+- Click two points to measure separation
+- Display: Distance in degrees (`angular_distance` formula)
+- Use case: Separation between stars, constellation size
+
+### Shape Tools
+
+<CardGroup cols={3}>
+  <Card title="Circle" icon="circle">
+    Measure circular field of view:
+    - Drag from center to edge
+    - Shows: Diameter (deg), Area (deg²)
+    - Perfect for telescope eyepiece FOV
+  </Card>
+
+  <Card title="Square" icon="square">
+    Constrained rectangular FOV:
+    - Automatically maintains aspect ratio 1:1
+    - Shows: Width, Height, Area
+    - Useful for square sensor frames
+  </Card>
+
+  <Card title="Rectangle" icon="rectangle-wide">
+    Free-form rectangular FOV:
+    - Independent width/height control
+    - Rotation handle for orientation
+    - Shows: Width, Height, Area
+    - Matches most camera sensors
+  </Card>
+</CardGroup>
+
+All measurements use spherical geometry for accuracy. See `measurement_tools.py` for implementation details.
+
+## Telescope Mode Basics
+
+Telescope mode simulates a reticle view for framing and planning observations:
+
+<Steps>
+  <Step title="Activate Telescope Mode">
+    Click the telescope icon in the toolbar or use the menu. The screen will darken outside the simulated FOV.
+  </Step>
+
+  <Step title="Set Target Center">
+    Click anywhere on the sky to position the reticle center. The HUD will show:
+    - Current FOV (degrees and arcminutes)
+    - Movement speed mode (SLOW/FAST)
+    - Optional: RA/Dec coordinates if configured
+  </Step>
+
+  <Step title="Adjust FOV">
+    Configure your optical setup:
+    
+    **Sensor presets** (`SENSOR_PRESETS` in `telescope_scope_mode.py:27-32`):
+    - Tiny: 5.37×4.04 mm (~1/2.8" sensor)
+    - APS-C: 23.6×15.7 mm
+    - Full Frame: 36.0×24.0 mm
+    
+    **Focal length**: Set your telescope/lens focal length (mm)
+    
+    FOV calculation: `2 × arctan(sensor_size / (2 × focal_length))`
+    
+    <Note>
+    You can also set manual FOV override in degrees if you know your exact field width/height.
+    </Note>
+  </Step>
+
+  <Step title="Frame Your Target">
+    Use these controls for precise positioning:
+    
+    - **Arrow keys**: Tap for discrete steps
+      - Slow mode: 0.05 arcmin steps
+      - Fast mode: 0.05° steps
+    - **Click + Drag**: Pan the reticle smoothly
+    - **Ctrl + Wheel**: Adjust scope FOV (change focal length)
+    - **Wheel**: Zoom global view without changing scope FOV
+    - **M key**: Toggle slow/fast movement speed
+  </Step>
+
+  <Step title="Choose Reticle Shape">
+    Switch between:
+    - **Circle**: Round eyepiece or uniform FOV
+    - **Rectangle**: Camera sensor with aspect ratio
+    
+    The exterior is darkened with alpha overlay (190/255) to emphasize the frame (see `telescope_scope_mode.py:226`).
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Horizon not appearing
+
+<AccordionGroup>
+  <Accordion title="DEM files not detected">
+    **Symptoms**: Procedural terrain only, no real horizon
+    
+    **Solutions**:
+    - Verify DEM files are in supported format (`.asc`, `.tif`)
+    - Check file extensions match exactly (case-sensitive on Linux)
+    - Ensure folder contains files directly (not in nested subdirectories)
+    - Reopen terrain config dialog and reselect folder
+  </Accordion>
+
+  <Accordion title="Location outside DEM coverage">
+    **Symptoms**: Flat horizon or gaps in profile
+    
+    **Solutions**:
+    - Verify your latitude/longitude is within downloaded tile coverage
+    - Download additional tiles for your observation area (±150 km)
+    - Check console for "No valid tiles found" warnings
+  </Accordion>
+
+  <Accordion title="Computation stuck or slow">
+    **Symptoms**: Initial generation takes >5 minutes
+    
+    **Solutions**:
+    - First-time generation builds `.npy` cache files (one-time cost)
+    - Reduce horizon quality preset temporarily (use Normal or Low)
+    - Check disk I/O if files are on network storage
+    - Monitor console for progress messages
+  </Accordion>
+</AccordionGroup>
+
+### Performance issues
+
+<AccordionGroup>
+  <Accordion title="Low framerate or stuttering">
+    **Solutions**:
+    - Reduce horizon quality preset (Low = 10 bands)
+    - Disable light pollution DVNL if not needed
+    - Close other GPU-intensive applications
+    - Check that PyQt5 is using hardware acceleration
+  </Accordion>
+
+  <Accordion title="High memory usage">
+    **Solutions**:
+    - DEM tiles are cached in RAM for speed
+    - Limit coverage area to necessary radius only
+    - Restart TerraLab to clear cache
+    - Consider using lower-resolution source DEMs (25m vs 5m)
+  </Accordion>
+</AccordionGroup>
+
+### Light pollution not visible
+
+<AccordionGroup>
+  <Accordion title="DVNL not loading">
+    **Symptoms**: Light domes not appearing on horizon
+    
+    **Solutions**:
+    - Verify DVNL file is valid GeoTIFF (`.tif`)
+    - Check file projection matches WGS84 if possible
+    - Ensure file covers your observation location
+    - Review console for DVNL loading errors
+  </Accordion>
+
+  <Accordion title="Effect too subtle">
+    **Symptoms**: Light pollution seems to have no impact
+    
+    **Solutions**:
+    - Increase Bortle class in settings (effect scales with Bortle)
+    - Point view toward known light pollution source (city direction)
+    - Effect is strongest at low altitudes (0-15°)
+    - Verify DVNL path is set in terrain config dialog
+  </Accordion>
+</AccordionGroup>
+
+### Telescope mode issues
+
+<AccordionGroup>
+  <Accordion title="Reticle not visible or offset">
+    **Solutions**:
+    - Click on sky to reposition reticle center
+    - Ensure FOV is reasonable (0.1° - 90°)
+    - Check that sensor + focal length combination is valid
+    - Press **Esc** and re-enter telescope mode to reset
+  </Accordion>
+
+  <Accordion title="Movement too fast or too slow">
+    **Solutions**:
+    - Press **M** to toggle speed mode (SLOW/FAST)
+    - Slow: 0.5 arcmin/s hold, 0.05 arcmin tap
+    - Fast: 0.5 deg/s hold, 0.05 deg tap
+    - Use Ctrl+Drag for camera pan if reticle movement feels wrong
+  </Accordion>
+</AccordionGroup>
+
+### Application crashes or freezes
+
+<AccordionGroup>
+  <Accordion title="Segmentation fault on startup">
+    **Solutions**:
+    - Check `terralab_crash.log` in working directory for fault handler output
+    - Verify all dependencies installed: `pip install PyQt5 numpy skyfield`
+    - Update graphics drivers (OpenGL issues common on Linux)
+    - Try running with `python -m TerraLab` for detailed traceback
+  </Accordion>
+
+  <Accordion title="Skyfield import error">
+    **Symptoms**: `WARNING: Skyfield not available`
+    
+    **Solutions**:
+    - Install missing dependency: `pip install skyfield`
+    - Verify numpy is also installed (Skyfield dependency)
+    - Use virtual environment to avoid version conflicts
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="lightbulb" href="/concepts/horizon-engine">
+    Learn how the multi-band horizon raycasting engine works
+  </Card>
+
+  <Card title="Light Pollution Model" icon="city" href="/concepts/light-pollution">
+    Deep dive into DVNL integration and Bortle scaling
+  </Card>
+
+  <Card title="API Reference" icon="code" href="/api/config">
+    Programmatic access to ConfigManager and horizon profiles
+  </Card>
+
+  <Card title="CLI Tools" icon="terminal" href="/cli/calibrate-sqm">
+    Batch processing and calibration utilities
+  </Card>
+</CardGroup>

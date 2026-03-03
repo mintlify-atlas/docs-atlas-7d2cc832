@@ -1,0 +1,414 @@
+---
+title: 'Overlay'
+description: 'Multi-band terrain silhouette renderer with atmospheric perspective'
+---
+
+## Overview
+
+The HorizonOverlay class renders real DEM horizon profiles as layered silhouettes with atmospheric perspective. It uses a hybrid projection system:
+- **X axis:** Linear mapping based on azimuth (fixes fisheye 'squeeze')
+- **Y axis:** Vertical displacement from the sky's horizon curve (maintains registration)
+
+Inspired by topographic horizon viewers, this renderer provides realistic multi-band mountain silhouettes with day/night color transitions.
+
+## Constants
+
+### Color Palette
+
+The overlay uses a gradient palette with 5 key stops from farthest (haze) to nearest (foreground):
+
+```python
+_PALETTE_STOPS = [
+    # (night_rgb, day_rgb)
+    ((60, 70, 90),   (170, 185, 205)),  # t=0.0  Deepest Haze
+    ((48, 58, 78),   (145, 160, 180)),  # t=0.25 Mid Haze
+    ((32, 42, 62),   (105, 120, 135)),  # t=0.50 Mid-range
+    ((14, 22, 44),   (75, 90, 75)),     # t=0.75 Near hills
+    ((5, 12, 28),    (55, 70, 55)),     # t=1.0  Foreground
+]
+```
+
+### Ground Colors
+
+<ParamField path="GROUND_NIGHT" type="QColor" default="QColor(5, 10, 25)">
+  Ground fill color for night mode (dark blue-black)
+</ParamField>
+
+<ParamField path="GROUND_DAY" type="QColor" default="QColor(55, 70, 55)">
+  Ground fill color for day mode (forest green)
+</ParamField>
+
+## Functions
+
+### generate_layer_defs
+
+```python
+generate_layer_defs(bands: list) -> list
+```
+
+Generates layer definitions from engine band definitions. Converts band distance information into rendering layers with appropriate colors and parallax.
+
+<ParamField path="bands" type="list" required>
+  List of band dictionaries from `engine.generate_bands()` with 'id', 'min', 'max' keys
+</ParamField>
+
+**Returns:** List of tuples `(band_id, parallax, night_QColor, day_QColor)`
+
+**Note:** Bands are reversed so the farthest band is drawn first (painter z-order). Uses square root mapping to stretch near colors (green) further into the distance.
+
+#### Example
+
+```python
+from TerraLab.terrain.engine import generate_bands
+from TerraLab.terrain.overlay import generate_layer_defs
+
+bands = generate_bands(20)
+layer_defs = generate_layer_defs(bands)
+
+for band_id, parallax, night_c, day_c in layer_defs[:3]:
+    print(f"{band_id}: parallax={parallax:.2f}, night={night_c.name()}, day={day_c.name()}")
+```
+
+## Classes
+
+### HorizonOverlay
+
+Main overlay class for rendering terrain silhouettes. Inherits from QObject for Qt signal support.
+
+#### Constructor
+
+```python
+HorizonOverlay(
+    parent=None,
+    horizon_profile_path=None,
+    vert_exaggeration=1.0
+)
+```
+
+<ParamField path="parent" type="QObject" default="None">
+  Parent QObject for Qt ownership
+</ParamField>
+
+<ParamField path="horizon_profile_path" type="str" default="None">
+  Optional path to pre-baked horizon profile .npz file to load on construction
+</ParamField>
+
+<ParamField path="vert_exaggeration" type="float" default="1.0">
+  Vertical exaggeration multiplier for elevation angles. Higher values make mountains appear taller.
+</ParamField>
+
+#### Signals
+
+##### request_update
+
+```python
+request_update = pyqtSignal()
+```
+
+Emitted when the overlay needs to be redrawn (e.g., after loading a new profile).
+
+#### Attributes
+
+<ParamField path="vert_exaggeration" type="float">
+  Vertical exaggeration multiplier
+</ParamField>
+
+<ParamField path="profile" type="HorizonProfile">
+  Currently loaded horizon profile
+</ParamField>
+
+#### Methods
+
+##### set_profile
+
+```python
+set_profile(profile, layer_defs=None)
+```
+
+Updates the overlay with a new HorizonProfile object (typically from a background worker).
+
+<ParamField path="profile" type="HorizonProfile" required>
+  Horizon profile with baked bands from the terrain engine
+</ParamField>
+
+<ParamField path="layer_defs" type="list" default="None">
+  Optional list of `(band_id, parallax, night_QColor, day_QColor)` tuples. If None, uses the global LAYER_DEFS.
+</ParamField>
+
+**Emits:** `request_update` signal after processing layers
+
+**Process:**
+1. Clears existing layers
+2. Generates noise seed based on observer position (prevents flickering)
+3. Creates _BandPoints objects for each layer
+4. Filters out bands with no data
+
+##### draw
+
+```python
+draw(
+    painter: QPainter,
+    projection_fn,
+    width: int,
+    height: int,
+    current_azimuth: float,
+    zoom_level: float,
+    elevation_angle: float,
+    ut_hour: float,
+    draw_flat_line: bool = False,
+    projection_fn_numpy = None,
+    draw_domes_callback = None
+)
+```
+
+Main rendering entry point. Draws all terrain layers and ground fill.
+
+<ParamField path="painter" type="QPainter" required>
+  Qt painter object for rendering
+</ParamField>
+
+<ParamField path="projection_fn" type="callable" required>
+  Projection function: `(elevation_deg, azimuth_deg) -> (x, y)` in screen coordinates
+</ParamField>
+
+<ParamField path="width" type="int" required>
+  Canvas width in pixels
+</ParamField>
+
+<ParamField path="height" type="int" required>
+  Canvas height in pixels
+</ParamField>
+
+<ParamField path="current_azimuth" type="float" required>
+  Current view azimuth in degrees (0-360)
+</ParamField>
+
+<ParamField path="zoom_level" type="float" required>
+  Zoom multiplier (1.0 = normal, higher = zoomed in)
+</ParamField>
+
+<ParamField path="elevation_angle" type="float" required>
+  Current view elevation angle in degrees. Skips rendering if > 60° (looking at zenith)
+</ParamField>
+
+<ParamField path="ut_hour" type="float" required>
+  UTC hour (0-24) for day/night color interpolation. 0 = midnight, 12 = noon
+</ParamField>
+
+<ParamField path="draw_flat_line" type="bool" default="False">
+  If True, draws a simple straight horizon line instead of terrain silhouettes
+</ParamField>
+
+<ParamField path="projection_fn_numpy" type="callable" default="None">
+  Optimized vectorized projection function: `(elevation_array, azimuth_array) -> (x_array, y_array)`. Significantly faster than scalar projection.
+</ParamField>
+
+<ParamField path="draw_domes_callback" type="callable" default="None">
+  Optional callback for drawing light pollution domes: `(painter, azimuth_idx, distance)`. Called between terrain layers for proper z-ordering.
+</ParamField>
+
+**Rendering pipeline:**
+1. Calculates night/day interpolation factor from UTC hour
+2. Early exit if looking at zenith (elevation > 60°)
+3. Computes FOV and pixel scaling factors
+4. Pre-calculates culling range (viewport + margin)
+5. Generates organic noise for near-ground bands (< 500m)
+6. Preprocesses light domes and clusters them by azimuth
+7. Draws bands back-to-front with interleaved dome rendering
+8. Fills ground area below nearest band
+
+**Optimization features:**
+- **Culling:** Only renders points within viewport + 10° margin
+- **Vectorization:** Uses NumPy arrays for projection when `projection_fn_numpy` is provided
+- **Adaptive noise:** Only applies detail noise to foreground bands
+- **Light dome clustering:** Groups nearby light sources to avoid overcrowding
+
+## Internal Classes
+
+### _BandPoints
+
+Internal class that holds (azimuth_deg, elevation_deg) points for one profile band.
+
+#### Attributes
+
+<ParamField path="band_id" type="str">
+  Band identifier (e.g., "near_144_208")
+</ParamField>
+
+<ParamField path="band_min" type="float">
+  Minimum distance in meters (parsed from band_id)
+</ParamField>
+
+<ParamField path="band_max" type="float">
+  Maximum distance in meters (parsed from band_id)
+</ParamField>
+
+<ParamField path="points" type="Tuple[np.ndarray, np.ndarray]">
+  Tuple of (azimuth_array, elevation_array) in degrees
+</ParamField>
+
+<ParamField path="VOID_THRESHOLD" type="float" default="-80.0">
+  DEM voids are stored as approximately -90°. Values below this threshold are replaced with -20.0
+</ParamField>
+
+## Example Usage
+
+### Basic Setup
+
+```python
+from TerraLab.terrain.overlay import HorizonOverlay
+from TerraLab.terrain.engine import load_profile
+from PyQt5.QtGui import QPainter
+
+# Create overlay with profile
+overlay = HorizonOverlay(
+    horizon_profile_path="horizon_profile.npz",
+    vert_exaggeration=2.0
+)
+
+# Connect update signal
+overlay.request_update.connect(update_canvas)
+```
+
+### Update Profile from Worker
+
+```python
+from TerraLab.terrain.overlay import generate_layer_defs
+
+def on_profile_ready(profile):
+    """Called when HorizonWorker emits profile_ready."""
+    # Generate matching layer definitions
+    layer_defs = generate_layer_defs(profile.bands)
+    
+    # Update overlay
+    overlay.set_profile(profile, layer_defs)
+```
+
+### Render in Paint Event
+
+```python
+def paintEvent(self, event):
+    painter = QPainter(self)
+    
+    # Define projection function
+    def project(elev_deg, az_deg):
+        # Your stereographic/gnomonic projection here
+        x = compute_x(elev_deg, az_deg)
+        y = compute_y(elev_deg, az_deg)
+        return (x, y)
+    
+    # Optional: Vectorized projection for performance
+    def project_numpy(elev_array, az_array):
+        # Vectorized version using NumPy
+        x_array = compute_x_vectorized(elev_array, az_array)
+        y_array = compute_y_vectorized(elev_array, az_array)
+        return (x_array, y_array)
+    
+    # Draw terrain
+    overlay.draw(
+        painter=painter,
+        projection_fn=project,
+        width=self.width(),
+        height=self.height(),
+        current_azimuth=180.0,  # Looking south
+        zoom_level=1.0,
+        elevation_angle=0.0,    # Looking at horizon
+        ut_hour=14.5,           # 2:30 PM UTC
+        projection_fn_numpy=project_numpy
+    )
+```
+
+### Light Pollution Domes
+
+```python
+def draw_dome(painter, azimuth_idx, distance):
+    """Draw a light dome at specific azimuth."""
+    profile = overlay.profile
+    az = profile.azimuths[azimuth_idx]
+    intensity = profile.light_domes[azimuth_idx]
+    
+    # Draw glow effect
+    color = QColor(255, 200, 100, int(intensity * 50))
+    painter.setBrush(QBrush(color))
+    # ... drawing logic ...
+
+overlay.draw(
+    painter=painter,
+    projection_fn=project,
+    width=800,
+    height=600,
+    current_azimuth=180.0,
+    zoom_level=1.0,
+    elevation_angle=0.0,
+    ut_hour=2.0,  # Night time
+    draw_domes_callback=draw_dome
+)
+```
+
+### Flat Horizon Mode
+
+```python
+# Draw simple flat line (e.g., for ocean horizon)
+overlay.draw(
+    painter=painter,
+    projection_fn=project,
+    width=800,
+    height=600,
+    current_azimuth=180.0,
+    zoom_level=1.0,
+    elevation_angle=0.0,
+    ut_hour=12.0,
+    draw_flat_line=True  # Ignores terrain data
+)
+```
+
+## Performance Tips
+
+1. **Use vectorized projection:** Provide `projection_fn_numpy` for 10-100x speedup on large profiles
+2. **Optimize vertical exaggeration:** Lower values (0.5-1.5) render faster than high exaggeration (3.0+)
+3. **Limit bands:** Use 20-40 bands for real-time rendering; 60+ for static exports
+4. **Pre-filter domes:** Only pass `draw_domes_callback` if light pollution data is available
+
+## Technical Details
+
+### Organic Noise Generation
+
+Foreground bands (< 500m) receive procedural noise to simulate microterrain detail:
+
+```python
+NEAR_NOISE_MAX_M = 500.0    # Max distance for noise
+NEAR_NOISE_AMP_DEG = 3.0    # Max amplitude in degrees
+
+# Multi-octave sinusoidal noise with integer frequencies
+# (ensures 360° periodicity)
+noise = (
+    amp * 0.55 * sin(azimuth * 1 + seed) +      # Large ridges
+    amp * 0.30 * sin(azimuth * 3 + seed * 1.7) +  # Medium detail
+    amp * 0.15 * sin(azimuth * 7 + seed * 3.1)    # Fine detail
+)
+```
+
+### Light Dome Clustering
+
+Light pollution peaks are clustered within 15° azimuth radius to consolidate urban centers and avoid rendering hundreds of individual domes:
+
+```python
+CLUSTER_RADIUS = 15.0  # degrees
+
+# 1. Detect local maxima in light_domes array
+# 2. Sort by intensity (brightest first)
+# 3. Group neighbors within CLUSTER_RADIUS
+# 4. Render only cluster centers
+```
+
+### Day/Night Interpolation
+
+Color transitions use smoothstep for natural twilight gradients:
+
+```python
+def _calc_t_night(ut_hour: float) -> float:
+    val = cos((ut_hour / 24.0) * 2 * pi)
+    t = (val + 1.0) / 2.0
+    t = t * t * (3.0 - 2.0 * t)  # smoothstep
+    return clamp(t, 0.0, 1.0)
+```

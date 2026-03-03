@@ -1,0 +1,158 @@
+---
+title: "SQM Calibration"
+description: "Calibrate DVNL radiance values to ground-truth SQM measurements"
+---
+
+## SQMCalibrationModel
+
+Calibrates a robust regression model to map DVNL aggregated predictors to SQM measurements.
+
+The model uses a log-linear relationship:
+
+```
+SQM = α + β × log₁₀(DVNL_agg + ε) + γ × (elevation / 1000)
+```
+
+### Constructor
+
+```python
+SQMCalibrationModel(epsilon: float = 1e-3)
+```
+
+<ParamField path="epsilon" type="float" default="1e-3">
+  Small offset added to DVNL values to avoid log(0)
+</ParamField>
+
+### Attributes
+
+<ResponseField name="epsilon" type="float">
+  The epsilon offset value used in log transformation
+</ResponseField>
+
+<ResponseField name="model" type="HuberRegressor">
+  The underlying sklearn HuberRegressor model
+</ResponseField>
+
+<ResponseField name="fitted" type="bool">
+  Whether the model has been fitted to training data
+</ResponseField>
+
+## Methods
+
+### fit
+
+Fits a log-linear model mapping log(DVNL_agg) + Elevation to SQM.
+
+```python
+fit(
+    aggregated_dvnl: np.ndarray,
+    elevation_m: np.ndarray,
+    target_sqm: np.ndarray
+) -> SQMCalibrationModel
+```
+
+#### Parameters
+
+<ParamField path="aggregated_dvnl" type="np.ndarray" required>
+  The kernel-aggregated DVNL radiance values
+</ParamField>
+
+<ParamField path="elevation_m" type="np.ndarray" required>
+  The observer's elevation in meters
+</ParamField>
+
+<ParamField path="target_sqm" type="np.ndarray" required>
+  Real SQM measurements to fit against
+</ParamField>
+
+#### Returns
+
+<ResponseField name="self" type="SQMCalibrationModel">
+  Returns the fitted model instance for method chaining
+</ResponseField>
+
+### predict
+
+Predicts the SQM from new kernel-aggregated DVNL data.
+
+```python
+predict(
+    aggregated_dvnl: np.ndarray,
+    elevation_m: np.ndarray
+) -> np.ndarray
+```
+
+#### Parameters
+
+<ParamField path="aggregated_dvnl" type="np.ndarray" required>
+  Aggregated radiance values
+</ParamField>
+
+<ParamField path="elevation_m" type="np.ndarray | float" required>
+  Elevation map in meters or a scalar value
+</ParamField>
+
+#### Returns
+
+<ResponseField name="sqm_predictions" type="np.ndarray">
+  Predicted Zenith SQM values in mag/arcsec²
+</ResponseField>
+
+### save
+
+Saves the serialized model using joblib.
+
+```python
+save(filepath: str) -> None
+```
+
+<ParamField path="filepath" type="str" required>
+  Path where the model will be saved
+</ParamField>
+
+### load
+
+Loads a serialized model from the given path.
+
+```python
+load(filepath: str) -> SQMCalibrationModel
+```
+
+<ParamField path="filepath" type="str" required>
+  Path to the saved model file
+</ParamField>
+
+#### Returns
+
+<ResponseField name="self" type="SQMCalibrationModel">
+  Returns the model instance with loaded parameters
+</ResponseField>
+
+## Example
+
+```python
+import numpy as np
+from light_pollution.calibration import SQMCalibrationModel
+
+# Initialize model
+model = SQMCalibrationModel(epsilon=1e-3)
+
+# Prepare training data
+agg_dvnl = np.array([0.5, 1.2, 2.3, 0.8])
+elevation = np.array([100, 250, 50, 300])
+sqm_measurements = np.array([21.5, 20.8, 19.5, 21.9])
+
+# Fit the model
+model.fit(agg_dvnl, elevation, sqm_measurements)
+
+# Make predictions
+new_dvnl = np.array([0.6, 1.5])
+new_elevation = np.array([150, 200])
+predicted_sqm = model.predict(new_dvnl, new_elevation)
+
+# Save for later use
+model.save("sqm_calibration.pkl")
+
+# Load the model
+loaded_model = SQMCalibrationModel().load("sqm_calibration.pkl")
+```

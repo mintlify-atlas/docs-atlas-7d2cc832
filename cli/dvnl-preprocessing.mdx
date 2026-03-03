@@ -1,0 +1,159 @@
+---
+title: DVNL Preprocessing
+description: Tools for preprocessing and convolving DVNL satellite imagery
+---
+
+## Overview
+
+The DVNL preprocessing tools prepare satellite light pollution data for analysis by cleaning the data, handling NoData values, and applying spatial dispersion kernels.
+
+## terralab-dvnl-preprocess
+
+Validates and cleans DVNL GeoTIFF files, ensuring NoData is correctly masked and metadata is preserved.
+
+### Purpose
+
+- Convert raster data to float32 format for downstream processing
+- Properly handle NoData values by converting them to NaN
+- Remove outlier values (> 1e10) that appear in some DVNL versions
+- Preserve geospatial metadata and apply LZW compression
+- Process large files in memory-efficient blocks
+
+### Usage
+
+```bash
+terralab-dvnl-preprocess <input> <output>
+```
+
+### Arguments
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `input` | Path | Yes | Path to input DVNL .tif file |
+| `output` | Path | Yes | Path to output cleaned .tif file |
+
+### Examples
+
+**Basic preprocessing:**
+
+```bash
+terralab-dvnl-preprocess raw_dvnl_2023.tif clean_dvnl_2023.tif
+```
+
+**Process multiple files:**
+
+```bash
+for file in raw_data/*.tif; do
+  terralab-dvnl-preprocess "$file" "clean_data/$(basename "$file")"
+done
+```
+
+### Output
+
+The output file will have:
+- **Data type:** float32
+- **NoData value:** NaN
+- **Compression:** LZW
+- **Geospatial metadata:** Preserved from input file
+
+---
+
+## terralab-dvnl-convolve
+
+Performs radial kernel convolution on DVNL rasters to model light dispersion. Uses a tiled overlap-add approach for memory efficiency on large rasters.
+
+### Purpose
+
+- Apply spatial dispersion models to light pollution data
+- Simulate how artificial light spreads through the atmosphere
+- Generate aggregated radiance maps for SQM calibration
+- Process large rasters efficiently using tiled processing
+
+### Usage
+
+```bash
+terralab-dvnl-convolve <input> <output> [OPTIONS]
+```
+
+### Arguments
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `input` | Path | Yes | - | Preprocessed DVNL .tif (float32, NaN for NoData) |
+| `output` | Path | Yes | - | Output aggregated .tif |
+| `--kernel` | Choice | No | `gaussian` | Kernel type: `gaussian` or `power-law` |
+| `--sigma` | Float | No | `30.0` | Sigma for Gaussian kernel (km) |
+| `--rmax` | Float | No | `200.0` | Cutoff radius (km) |
+| `--res` | Float | No | `1.0` | Resolution (km/pixel) |
+
+### Kernel Types
+
+**Gaussian Kernel**
+
+Models light dispersion as a Gaussian distribution. Suitable for general atmospheric scattering.
+
+- Controlled by `--sigma` parameter
+- Larger sigma = more spreading
+- Typical values: 20-50 km
+
+**Power-Law Kernel**
+
+Models light dispersion using a power-law function. Better for modeling light domes around cities.
+
+- Uses default parameters: p=2.0, r0=1.0 km, λ=50.0 km
+- More physically motivated for certain atmospheric conditions
+
+### Examples
+
+**Basic Gaussian convolution:**
+
+```bash
+terralab-dvnl-convolve clean_dvnl.tif convolved_dvnl.tif
+```
+
+**Gaussian with custom parameters:**
+
+```bash
+terralab-dvnl-convolve clean_dvnl.tif convolved_dvnl.tif \
+  --kernel gaussian \
+  --sigma 40.0 \
+  --rmax 250.0 \
+  --res 1.0
+```
+
+**Power-law kernel:**
+
+```bash
+terralab-dvnl-convolve clean_dvnl.tif convolved_power_law.tif \
+  --kernel power-law \
+  --rmax 200.0
+```
+
+**High-resolution processing:**
+
+```bash
+terralab-dvnl-convolve clean_dvnl_hires.tif convolved_hires.tif \
+  --sigma 30.0 \
+  --res 0.5
+```
+
+### Processing Details
+
+- **Tile size:** 1024×1024 pixels
+- **Method:** FFT-based convolution with overlap-add
+- **Memory efficiency:** Processes in tiles with halo regions
+- **NoData handling:** Converts NaN to 0 during convolution, preserves NaN locations in output
+
+### Performance Tips
+
+- Smaller `--rmax` values process faster but may truncate kernel effects
+- Power-law kernels may take longer to compute than Gaussian
+- For very large rasters (> 10,000×10,000), consider processing in geographic tiles
+
+### Output
+
+The output file contains:
+- **Aggregated radiance values** representing light from surrounding areas
+- **Same dimensions and georeference** as input
+- **LZW compression** with tiled structure
+- **NaN values** preserved where input had NoData

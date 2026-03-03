@@ -1,0 +1,568 @@
+---
+title: Spherical Math
+description: Coordinate transformation utilities for spherical astronomy and horizon-based calculations
+---
+
+## Overview
+
+The `spherical_math` module provides coordinate transformation functions for astronomical calculations in horizon-based coordinate systems. It handles conversions between sky coordinates (altitude/azimuth) and Cartesian vectors, great-circle distance calculations, and geodesic operations on the celestial sphere.
+
+**Location**: `widgets/spherical_math.py`
+
+## Type Definitions
+
+### SkyCoord
+
+Tuple representing sky coordinates in the local horizon frame.
+
+```python
+SkyCoord = Tuple[float, float]  # (alt_deg, az_deg)
+```
+
+**Components**
+- `alt_deg` (float): Altitude angle in degrees (-90° to +90°)
+  - +90° = zenith (directly overhead)
+  - 0° = horizon
+  - -90° = nadir (directly below)
+- `az_deg` (float): Azimuth angle in degrees (0° to 360°)
+  - 0° = North
+  - 90° = East
+  - 180° = South
+  - 270° = West
+
+## Functions
+
+### sky_to_vector()
+
+Converts horizon coordinates (altitude, azimuth) to a 3D unit vector.
+
+```python
+def sky_to_vector(coord: SkyCoord) -> Tuple[float, float, float]
+```
+
+**Parameters**
+- `coord` (SkyCoord): `(alt_deg, az_deg)` tuple
+
+**Returns**
+- `tuple`: `(x, y, z)` unit vector in local horizon frame where:
+  - `x`: Points to North horizon
+  - `y`: Points to East horizon  
+  - `z`: Points to zenith
+
+**Algorithm**
+```python
+alt = radians(clamp(alt_deg, -90, 90))
+az = radians(wrap_360(az_deg))
+ca = cos(alt)
+x = ca * cos(az)  # North component
+y = ca * sin(az)  # East component
+z = sin(alt)       # Zenith component
+```
+
+**Example**
+```python
+from widgets.spherical_math import sky_to_vector
+
+# Zenith (directly overhead)
+v_zenith = sky_to_vector((90.0, 0.0))
+print(v_zenith)  # (0.0, 0.0, 1.0)
+
+# North horizon
+v_north = sky_to_vector((0.0, 0.0))
+print(v_north)   # (1.0, 0.0, 0.0)
+
+# 45° altitude, East
+v_east = sky_to_vector((45.0, 90.0))
+print(v_east)    # (0.0, 0.707, 0.707)
+```
+
+---
+
+### vector_to_sky()
+
+Converts a 3D vector to horizon coordinates (altitude, azimuth).
+
+```python
+def vector_to_sky(v: Sequence[float]) -> SkyCoord
+```
+
+**Parameters**
+- `v` (Sequence[float]): Vector `[x, y, z]` in local horizon frame (automatically normalized)
+
+**Returns**
+- `SkyCoord`: `(alt_deg, az_deg)` tuple
+
+**Algorithm**
+```python
+# Normalize vector
+n = sqrt(x² + y² + z²)
+if n < 1e-12: return (0.0, 0.0)
+x, y, z = x/n, y/n, z/n
+
+# Convert to spherical
+alt = degrees(asin(clamp(z, -1, 1)))
+az = degrees(atan2(y, x)) % 360
+```
+
+**Example**
+```python
+from widgets.spherical_math import vector_to_sky
+
+# Unit vector pointing East at 30° altitude
+v = [0.0, 0.866, 0.5]
+alt, az = vector_to_sky(v)
+print(f"Alt: {alt:.1f}°, Az: {az:.1f}°")
+# Alt: 30.0°, Az: 90.0°
+
+# Non-normalized vector (automatically normalized)
+v = [2.0, 0.0, 0.0]
+alt, az = vector_to_sky(v)
+print(f"Alt: {alt:.1f}°, Az: {az:.1f}°")
+# Alt: 0.0°, Az: 0.0°  (North horizon)
+```
+
+---
+
+### angular_distance()
+
+Calculates the great-circle angular distance between two sky coordinates.
+
+```python
+def angular_distance(a: SkyCoord, b: SkyCoord) -> float
+```
+
+**Parameters**
+- `a` (SkyCoord): First coordinate `(alt1, az1)`
+- `b` (SkyCoord): Second coordinate `(alt2, az2)`
+
+**Returns**
+- `float`: Angular separation in degrees (0° to 180°)
+
+**Algorithm**
+```python
+# Convert to unit vectors
+va = sky_to_vector(a)
+vb = sky_to_vector(b)
+
+# Dot product (clamped to avoid acos domain errors)
+dot = clamp(va·vb, -1.0, 1.0)
+
+# Great-circle distance
+θ = degrees(acos(dot))
+```
+
+**Example**
+```python
+from widgets.spherical_math import angular_distance
+
+# Distance from zenith to North horizon
+dist = angular_distance((90.0, 0.0), (0.0, 0.0))
+print(f"Distance: {dist:.1f}°")  # 90.0°
+
+# Distance between two stars
+star1 = (30.0, 45.0)   # 30° alt, 45° az (NE)
+star2 = (30.0, 135.0)  # 30° alt, 135° az (SE)
+dist = angular_distance(star1, star2)
+print(f"Star separation: {dist:.1f}°")  # ~76.3°
+```
+
+---
+
+### slerp_arc_points()
+
+Generates interpolated points along the shortest great-circle arc between two coordinates.
+
+```python
+def slerp_arc_points(
+    a: SkyCoord,
+    b: SkyCoord,
+    n_points: int = 64
+) -> List[SkyCoord]
+```
+
+**Parameters**
+- `a` (SkyCoord): Start coordinate
+- `b` (SkyCoord): End coordinate  
+- `n_points` (int): Number of interpolated points (default: 64)
+
+**Returns**
+- `List[SkyCoord]`: List of interpolated coordinates from `a` to `b`
+
+**Algorithm** (Spherical Linear Interpolation)
+```python
+# Convert to vectors
+va = sky_to_vector(a)
+vb = sky_to_vector(b)
+
+# Calculate angle
+ω = acos(va · vb)
+sin_ω = sin(ω)
+
+# Interpolate using SLERP formula
+for i in range(n):
+    t = i / (n - 1)
+    w0 = sin((1-t) * ω) / sin_ω
+    w1 = sin(t * ω) / sin_ω
+    v = w0 * va + w1 * vb
+    points[i] = vector_to_sky(v)
+```
+
+**Example**
+```python
+from widgets.spherical_math import slerp_arc_points
+
+# Great-circle arc from North to East (along horizon)
+start = (0.0, 0.0)    # North horizon
+end = (0.0, 90.0)     # East horizon
+
+arc = slerp_arc_points(start, end, n_points=10)
+for i, (alt, az) in enumerate(arc):
+    print(f"Point {i}: Alt={alt:.1f}°, Az={az:.1f}°")
+
+# Point 0: Alt=0.0°, Az=0.0°
+# Point 1: Alt=0.0°, Az=10.0°
+# ...
+# Point 9: Alt=0.0°, Az=90.0°
+```
+
+**Use Cases**
+- Drawing constellation lines across the sky
+- Animating smooth camera pans
+- Sampling measurement ruler paths
+
+---
+
+### destination_point()
+
+Calculates the destination point after traveling a given distance along a bearing (geodesic/direct problem).
+
+```python
+def destination_point(
+    center: SkyCoord,
+    bearing_deg: float,
+    distance_deg: float
+) -> SkyCoord
+```
+
+**Parameters**
+- `center` (SkyCoord): Starting coordinate `(alt, az)`
+- `bearing_deg` (float): Initial bearing in degrees (0° = North, 90° = East)
+- `distance_deg` (float): Angular distance to travel (degrees)
+
+**Returns**
+- `SkyCoord`: Destination coordinate `(alt, az)`
+
+**Algorithm** (Spherical Geodesic)
+
+Treats `(alt, az)` as `(lat, lon)` on a unit sphere:
+
+```python
+φ₁ = radians(alt)
+λ₁ = radians(az)
+θ = radians(bearing)
+d = radians(distance)
+
+# Destination latitude
+φ₂ = asin(sin(φ₁)*cos(d) + cos(φ₁)*sin(d)*cos(θ))
+
+# Destination longitude  
+λ₂ = λ₁ + atan2(sin(θ)*sin(d)*cos(φ₁), cos(d) - sin(φ₁)*sin(φ₂))
+
+return (degrees(φ₂), wrap_360(degrees(λ₂)))
+```
+
+**Example**
+```python
+from widgets.spherical_math import destination_point
+
+# Start at zenith, travel 30° towards North
+start = (90.0, 0.0)  # Zenith
+dest = destination_point(start, bearing_deg=0.0, distance_deg=30.0)
+print(dest)  # (60.0, 0.0) - 30° from zenith towards North
+
+# Start at horizon, travel 45° towards East
+start = (0.0, 0.0)   # North horizon
+dest = destination_point(start, bearing_deg=90.0, distance_deg=45.0)
+print(dest)  # (0.0, 45.0) - Northeast horizon
+
+# Circle around zenith
+for bearing in range(0, 360, 45):
+    pt = destination_point((90.0, 0.0), bearing, 30.0)
+    print(f"Bearing {bearing:3d}°: {pt}")
+```
+
+**Use Cases**
+- Drawing circles/arcs around sky coordinates
+- Rectangle/square measurement tool corners
+- Field-of-view boundaries
+
+---
+
+### screen_to_sky()
+
+Adapter function for converting screen coordinates to sky coordinates using a projection function.
+
+```python
+def screen_to_sky(
+    sx: float,
+    sy: float,
+    unproject_fn: Callable[[float, float], Optional[SkyCoord]]
+) -> Optional[SkyCoord]
+```
+
+**Parameters**
+- `sx` (float): Screen X coordinate (pixels)
+- `sy` (float): Screen Y coordinate (pixels)
+- `unproject_fn` (Callable): Projection inverse function `(sx, sy) -> (alt, az) | None`
+
+**Returns**
+- `Optional[SkyCoord]`: Sky coordinate `(alt, az)` or `None` if unprojection fails
+
+**Algorithm**
+```python
+try:
+    result = unproject_fn(sx, sy)
+    if result is None:
+        return None
+    alt, az = result
+    # Validate and clamp
+    if isnan(alt) or isnan(az):
+        return None
+    return (clamp(alt, -90, 90), wrap_360(az))
+except Exception:
+    return None
+```
+
+**Example**
+```python
+from widgets.spherical_math import screen_to_sky
+
+# Define custom unprojection (stereographic example)
+def my_unproject(sx, sy):
+    # ... stereographic inverse math ...
+    return (alt_deg, az_deg)
+
+# Convert mouse click to sky coordinate
+mouse_x, mouse_y = 400, 300
+sky_coord = screen_to_sky(mouse_x, mouse_y, my_unproject)
+
+if sky_coord:
+    alt, az = sky_coord
+    print(f"Clicked: Alt={alt:.2f}°, Az={az:.2f}°")
+else:
+    print("Click outside valid sky region")
+```
+
+**Use Cases**
+- Mouse/touch interaction with sky canvas
+- Measurement tool coordinate capture
+- Object identification under cursor
+
+---
+
+### angular_delta_signed()
+
+Calculates the signed shortest angular difference between two azimuth angles.
+
+```python
+def angular_delta_signed(a_az_deg: float, b_az_deg: float) -> float
+```
+
+**Parameters**
+- `a_az_deg` (float): First azimuth angle (degrees)
+- `b_az_deg` (float): Second azimuth angle (degrees)
+
+**Returns**
+- `float`: Signed difference `b - a` in degrees, range `[-180°, +180°)`
+  - Positive: `b` is clockwise from `a`
+  - Negative: `b` is counter-clockwise from `a`
+
+**Algorithm**
+```python
+Δ = (b - a + 180) % 360 - 180
+```
+
+**Example**
+```python
+from widgets.spherical_math import angular_delta_signed
+
+# Clockwise rotation
+delta = angular_delta_signed(10.0, 50.0)
+print(delta)  # +40.0°
+
+# Counter-clockwise (crossing 0°)
+delta = angular_delta_signed(350.0, 10.0)
+print(delta)  # +20.0° (not -340°)
+
+# Large counter-clockwise
+delta = angular_delta_signed(45.0, 315.0)
+print(delta)  # -90.0° (not +270°)
+```
+
+**Use Cases**
+- Smooth azimuth interpolation (avoiding 360°/0° jumps)
+- Camera rotation direction determination
+- Constellation boundary wrapping
+
+---
+
+## Helper Functions
+
+### _clamp()
+
+Clamps a value to a specified range.
+
+```python
+def _clamp(v: float, lo: float, hi: float) -> float
+```
+
+**Parameters**
+- `v` (float): Input value
+- `lo` (float): Minimum value
+- `hi` (float): Maximum value
+
+**Returns**
+- `float`: `max(lo, min(hi, v))`
+
+---
+
+### _wrap_angle_180()
+
+Wraps angle to range `[-180°, +180°)`.
+
+```python
+def _wrap_angle_180(deg: float) -> float
+```
+
+---
+
+### _wrap_angle_360()
+
+Wraps angle to range `[0°, 360°)`.
+
+```python
+def _wrap_angle_360(deg: float) -> float
+```
+
+## Complete Example
+
+```python
+from widgets.spherical_math import (
+    sky_to_vector,
+    vector_to_sky,
+    angular_distance,
+    slerp_arc_points,
+    destination_point,
+    angular_delta_signed
+)
+import math
+
+# === Measurement Tool: Circle around a star ===
+
+star_coord = (45.0, 120.0)  # 45° altitude, 120° azimuth (ESE)
+circle_radius_deg = 15.0
+
+# Generate circle points
+circle_points = []
+for angle in range(0, 360, 10):
+    pt = destination_point(star_coord, bearing_deg=angle, distance_deg=circle_radius_deg)
+    circle_points.append(pt)
+
+print(f"Circle has {len(circle_points)} points")
+
+# === Great-circle distance between two objects ===
+
+vega = (38.78, 279.23)      # Vega coordinates (example)
+altair = (8.87, 241.85)     # Altair coordinates (example)
+
+dist = angular_distance(vega, altair)
+print(f"Vega to Altair: {dist:.2f}° separation")
+
+# === Draw smooth arc between them ===
+
+arc_line = slerp_arc_points(vega, altair, n_points=50)
+print(f"Arc has {len(arc_line)} interpolated points")
+
+# === Vector operations ===
+
+# Find midpoint using vector averaging
+vec_vega = sky_to_vector(vega)
+vec_altair = sky_to_vector(altair)
+vec_mid = (
+    (vec_vega[0] + vec_altair[0]) / 2,
+    (vec_vega[1] + vec_altair[1]) / 2,
+    (vec_vega[2] + vec_altair[2]) / 2
+)
+midpoint = vector_to_sky(vec_mid)
+print(f"Midpoint: Alt={midpoint[0]:.2f}°, Az={midpoint[1]:.2f}°")
+
+# === Azimuth rotation ===
+
+az_current = 350.0
+az_target = 10.0
+rotation = angular_delta_signed(az_current, az_target)
+print(f"Rotate {rotation:+.1f}° to reach target")  # +20.0°
+```
+
+## Coordinate System Reference
+
+### Horizon (Horizontal) Coordinates
+
+```
+         Zenith (90°, any az)
+             |
+             | 
+             |
+    NW ------+------ NE
+   (0°,315°) |      (0°,45°)
+             |
+West --------+-------- East
+(0°,270°)    |        (0°,90°)
+             |
+    SW ------+------ SE  
+  (0°,225°)  |     (0°,135°)
+             |
+          South
+         (0°,180°)
+```
+
+**Azimuth Convention**: 
+- 0° = North
+- Increases clockwise (East = 90°, South = 180°, West = 270°)
+
+**Altitude Convention**:
+- +90° = Zenith (straight up)
+- 0° = Horizon
+- -90° = Nadir (straight down, usually not visible)
+
+### Vector Frame
+
+```
+z (zenith)
+|
+|     y (East)
+|    /
+|   /
+|  /
+| /
++---------- x (North)
+```
+
+**Unit vector components**:
+- `x = cos(alt) * cos(az)` - North component
+- `y = cos(alt) * sin(az)` - East component  
+- `z = sin(alt)` - Zenith component
+
+## Performance Notes
+
+- All functions use native Python `math` (no numpy required)
+- Vector operations are O(1) constant time
+- `slerp_arc_points()` is O(n) where n = number of points
+- Safe for real-time interactive tools (sub-millisecond)
+- Automatic normalization prevents numerical drift
+
+## See Also
+
+- [AstroEngine](/api/astro/engine) - Celestial body position calculations
+- [Measurement Tools](/api/widgets/measurement-tools) - Uses spherical math for ruler/circle tools
+- [Sky Widget](/api/widgets/sky-widget) - Main astronomical canvas

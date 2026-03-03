@@ -1,0 +1,58 @@
+---
+title: "Bortle Scale"
+description: "Map SQM readings to the Bortle Dark-Sky Scale"
+---
+
+## sqm_to_bortle_class
+
+Converts a Zenith Sky Quality Meter (SQM) reading to a Bortle class.
+
+```python
+def sqm_to_bortle_class(sqm: float) -> int
+```
+
+### Parameters
+
+<ParamField path="sqm" type="float" required>
+  The sky brightness in mag/arcsec²
+</ParamField>
+
+### Returns
+
+<ResponseField name="bortle_class" type="int">
+  The integer Bortle class (1=Excellent Dark Sky, 9=Inner City)
+</ResponseField>
+
+### Bortle Class Thresholds
+
+The function uses the following SQM thresholds to determine Bortle classes:
+
+| Bortle Class | SQM Range (mag/arcsec²) | Sky Condition |
+|--------------|-------------------------|---------------|
+| 1 | ≥ 21.99 | Excellent dark-sky site |
+| 2 | 21.89 - 21.98 | Typical dark site |
+| 3 | 21.69 - 21.88 | Rural sky |
+| 4 | 20.49 - 21.68 | Rural/suburban transition |
+| 5 | 19.50 - 20.48 | Suburban sky |
+| 6 | 18.94 - 19.49 | Bright suburban sky |
+| 7 | 18.38 - 18.93 | Suburban/urban transition |
+| 8 | 17.80 - 18.37 | City sky |
+| 9 | < 17.80 | Inner-city sky |
+
+### Example
+
+```python
+from light_pollution.bortle import sqm_to_bortle_class
+
+# Excellent dark sky
+bortle = sqm_to_bortle_class(22.0)
+print(bortle)  # Output: 1
+
+# Suburban sky
+bortle = sqm_to_bortle_class(19.8)
+print(bortle)  # Output: 5
+
+# Inner city
+bortle = sqm_to_bortle_class(17.5)
+print(bortle)  # Output: 9
+```

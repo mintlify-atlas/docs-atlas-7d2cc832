@@ -1,0 +1,321 @@
+---
+title: 'Worker'
+description: 'Background worker for horizon profile computation without blocking the UI'
+---
+
+## Overview
+
+The terrain worker module provides Qt-based background processing for DEM tile loading and horizon profile baking. It prevents UI freezing during computationally intensive terrain analysis operations.
+
+## Classes
+
+### HorizonWorker
+
+Background worker to load DEM tiles and bake horizon profiles without freezing the UI. Inherits from QObject and runs in a separate QThread.
+
+#### Constructor
+
+```python
+HorizonWorker(tiles_dir=None, parent=None)
+```
+
+<ParamField path="tiles_dir" type="str" default="None">
+  Directory containing DEM tiles. If None, reads from ConfigManager
+</ParamField>
+
+<ParamField path="parent" type="QObject" default="None">
+  Parent QObject for Qt ownership
+</ParamField>
+
+#### Signals
+
+##### profile_ready
+
+```python
+profile_ready = pyqtSignal(object)
+```
+
+Emitted when a horizon profile has been successfully baked. Carries a HorizonProfile object.
+
+##### error_occurred
+
+```python
+error_occurred = pyqtSignal(str)
+```
+
+Emitted when an error occurs during initialization or baking. Carries an error message string.
+
+##### progress_message
+
+```python
+progress_message = pyqtSignal(str)
+```
+
+Emitted to report progress updates during tile loading and baking operations.
+
+#### Attributes
+
+<ParamField path="tiles_dir" type="str">
+  Path to DEM tiles directory
+</ParamField>
+
+<ParamField path="is_initialized" type="bool" default="False">
+  Whether the worker has completed initialization
+</ParamField>
+
+<ParamField path="provider" type="RasterProvider">
+  DEM data provider (either TiffRasterWindowProvider or AscRasterProvider)
+</ParamField>
+
+<ParamField path="observer_offset" type="float" default="0.0">
+  Extra height offset added to observer position in meters
+</ParamField>
+
+<ParamField path="light_sampler" type="LightPollutionSampler">
+  Light pollution data sampler for sky quality estimation
+</ParamField>
+
+<ParamField path="lp_preload_enabled" type="bool" default="False">
+  Whether light pollution preloading is enabled (set via TL_LP_PRELOAD=1 environment variable)
+</ParamField>
+
+#### Methods
+
+##### initialize
+
+```python
+initialize()
+```
+
+Lazy initialization of the heavy DEM index and raster provider. Automatically detects whether to use GeoTIFF or ASCII tile format based on directory contents.
+
+**Auto-detection logic:**
+- If `tiles_dir` points to a .tif/.tiff file → uses TiffRasterWindowProvider
+- If `tiles_dir` is a directory containing .tif/.tiff files → uses TiffRasterWindowProvider with the first file
+- Otherwise → uses AscRasterProvider for ASCII grid tiles
+
+**Emits:**
+- `progress_message` during initialization
+- `error_occurred` if initialization fails
+
+##### set_observer_offset
+
+```python
+set_observer_offset(offset: float)
+```
+
+Updates the observer extra height to use on the next bake.
+
+<ParamField path="offset" type="float" required>
+  Additional height offset in meters
+</ParamField>
+
+##### reload_config
+
+```python
+reload_config()
+```
+
+Flags the state to force re-initialization on the next bake. Closes existing provider and light sampler.
+
+##### get_bare_elevation
+
+```python
+get_bare_elevation(lat: float, lon: float) -> Optional[float]
+```
+
+Fast synchronous lookup for the UI. Returns the bare terrain elevation at the given coordinates.
+
+<ParamField path="lat" type="float" required>
+  Latitude in degrees (WGS84)
+</ParamField>
+
+<ParamField path="lon" type="float" required>
+  Longitude in degrees (WGS84)
+</ParamField>
+
+**Returns:** Elevation in meters or None if outside coverage or worker is busy
+
+**Note:** Uses a 50ms timeout to avoid freezing the UI thread if the worker is performing heavy I/O.
+
+##### get_bortle_estimate
+
+```python
+get_bortle_estimate(lat: float, lon: float) -> int
+```
+
+Fast synchronous lookup for UI. Returns the Bortle class (1-9) for sky quality estimation.
+
+<ParamField path="lat" type="float" required>
+  Latitude in degrees (WGS84)
+</ParamField>
+
+<ParamField path="lon" type="float" required>
+  Longitude in degrees (WGS84)
+</ParamField>
+
+**Returns:** Bortle class integer (1 = darkest, 9 = brightest)
+
+##### get_sqm_estimate
+
+```python
+get_sqm_estimate(lat: float, lon: float) -> float
+```
+
+Returns the estimated zenith SQM (Sky Quality Meter) value in magnitudes per square arcsecond.
+
+<ParamField path="lat" type="float" required>
+  Latitude in degrees (WGS84)
+</ParamField>
+
+<ParamField path="lon" type="float" required>
+  Longitude in degrees (WGS84)
+</ParamField>
+
+**Returns:** SQM value in mag/arcsec² (typically 18-22)
+
+##### request_bake (Slot)
+
+```python
+@pyqtSlot(float, float)
+request_bake(lat: float, lon: float)
+```
+
+Slot to trigger horizon profile baking for a specific location. This is the main entry point for background computation.
+
+<ParamField path="lat" type="float" required>
+  Observer latitude in degrees (WGS84)
+</ParamField>
+
+<ParamField path="lon" type="float" required>
+  Observer longitude in degrees (WGS84)
+</ParamField>
+
+**Process:**
+1. Initializes worker if not already initialized
+2. Transforms coordinates to native CRS (UTM)
+3. Pre-warms tile cache for the region (parallel I/O)
+4. Optionally pre-loads light pollution data
+5. Samples ground height at observer location
+6. Bakes horizon profile with configured quality settings
+7. Emits `profile_ready` signal with HorizonProfile object
+
+**Emits:**
+- `progress_message` during computation
+- `profile_ready` on success
+- `error_occurred` on failure
+
+**Configuration:**
+- Visibility radius: 150km
+- Step size: 50m
+- Azimuth resolution: 0.5°
+- Band count: Read from ConfigManager.get_horizon_quality()
+
+**Abort handling:**
+- Can be aborted by setting internal `_abort_requested` flag
+- Raises InterruptedError if aborted
+
+## Example Usage
+
+### Basic Setup
+
+```python
+from PyQt5.QtCore import QThread
+from TerraLab.terrain.worker import HorizonWorker
+
+# Create worker and thread
+worker_thread = QThread()
+worker = HorizonWorker(tiles_dir="/path/to/dem/tiles")
+worker.moveToThread(worker_thread)
+
+# Connect signals
+worker.profile_ready.connect(on_profile_ready)
+worker.error_occurred.connect(on_error)
+worker.progress_message.connect(on_progress)
+
+# Start thread
+worker_thread.start()
+
+# Request a bake (from main thread)
+worker.request_bake(42.1234, 1.5678)
+```
+
+### Signal Handlers
+
+```python
+def on_profile_ready(profile):
+    """Handle completed horizon profile."""
+    print(f"Profile baked for {profile.observer_lat}, {profile.observer_lon}")
+    print(f"Bands: {len(profile.bands)}")
+    print(f"Azimuths: {len(profile.azimuths)}")
+    
+    # Update overlay with new profile
+    horizon_overlay.set_profile(profile)
+
+def on_error(error_msg):
+    """Handle errors."""
+    print(f"Error: {error_msg}")
+
+def on_progress(message):
+    """Handle progress updates."""
+    print(f"Progress: {message}")
+```
+
+### Synchronous Queries
+
+```python
+# Get elevation (safe to call from UI thread)
+elevation = worker.get_bare_elevation(42.1234, 1.5678)
+if elevation is not None:
+    print(f"Elevation: {elevation:.1f}m")
+
+# Get sky quality
+bortle = worker.get_bortle_estimate(42.1234, 1.5678)
+sqm = worker.get_sqm_estimate(42.1234, 1.5678)
+print(f"Bortle class: {bortle}, SQM: {sqm:.2f}")
+```
+
+### Dynamic Observer Height
+
+```python
+# Adjust observer height offset (e.g., for telescope mount height)
+worker.set_observer_offset(2.5)  # 2.5m above ground
+
+# Next bake will use the new offset
+worker.request_bake(42.1234, 1.5678)
+```
+
+### Configuration Reload
+
+```python
+# Force reload after changing DEM tiles path in config
+worker.reload_config()
+
+# Next bake will re-initialize with new settings
+worker.request_bake(42.1234, 1.5678)
+```
+
+### Environment Variables
+
+```bash
+# Enable light pollution preloading (can cause GDAL crashes on some systems)
+export TL_LP_PRELOAD=1
+
+# Run application
+python main.py
+```
+
+## Thread Safety
+
+The HorizonWorker class is designed for Qt's signal/slot mechanism:
+
+- **Thread-safe methods:** `get_bare_elevation`, `get_bortle_estimate`, `get_sqm_estimate` use a lock with timeout to avoid UI freezing
+- **Async slot:** `request_bake` should be called from the main thread via signal/slot connection
+- **Provider lock:** Internal `provider_lock` protects concurrent access to DEM provider
+
+## Performance Notes
+
+- **Initialization:** First call to `initialize()` indexes all DEM tiles (can take several seconds for large tile collections)
+- **Tile caching:** ASCII tiles are converted to .npy binary format and cached on disk for faster subsequent loads
+- **Region preloading:** Before baking, tiles within 150km radius are pre-loaded in parallel
+- **Light pollution:** LP preload is disabled by default due to stability concerns on some Windows/GDAL configurations

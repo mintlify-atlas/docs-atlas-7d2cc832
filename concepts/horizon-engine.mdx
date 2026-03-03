@@ -1,0 +1,318 @@
+---
+title: Horizon Engine
+description: Raycasting algorithm with Earth curvature correction and depth bands
+---
+
+The **Horizon Engine** (`TerraLab/terrain/engine.py`) computes a 360° topographic profile by raycasting from the observer's position to distant mountains. Unlike simple viewshed algorithms, TerraLab accounts for **Earth curvature**, uses **logarithmic depth bands** for atmospheric perspective, and supports **light pollution occlusion**.
+
+## Algorithm Overview
+
+### 1. Raycasting Fundamentals
+
+For each azimuth angle (0–360°), the engine marches along a ray from the observer position, sampling terrain elevation at regular intervals:
+
+```python
+while d < d_max:
+    x = obs_x + d * sin(azimuth)  # UTM coordinates
+    y = obs_y + d * cos(azimuth)
+    
+    h_terr = self.provider.get_elevation(x, y)
+    
+    # Apply Earth curvature correction
+    drop = (d * d) / (2.0 * R_EARTH)  # Horizon drop in meters
+    h_visual = h_terr - drop - h_eye_abs
+    ang = math.atan2(h_visual, d)  # Elevation angle
+```
+
+Source: `TerraLab/terrain/engine.py:732-742`
+
+### 2. Earth Curvature Correction
+
+At large distances (>10 km), the spherical Earth causes terrain to drop below the geometric horizon. The correction formula is:
+
+$$
+h_{\text{corr}} = \frac{d^2}{2R_{\text{earth}}}
+$$
+
+Where:
+- $d$ = distance from observer (meters)
+- $R_{\text{earth}} = 6{,}371{,}000$ m (mean Earth radius)
+
+For example, at **100 km** distance:
+$$
+h_{\text{corr}} = \frac{(100{,}000)^2}{2 \times 6{,}371{,}000} \approx 785 \text{ m}
+$$
+
+This means a 2000m mountain at 100 km distance appears at the same angle as a 1215m peak without curvature correction.
+
+Source: `TerraLab/terrain/engine.py:626, 740`
+
+<Note>
+The curvature correction is **critical** for accurate horizon profiles in plains (e.g., Lleida) where distant Pyrenees peaks would otherwise appear much higher than reality.
+</Note>
+
+## Depth Bands
+
+### Logarithmic Partitioning
+
+Instead of a single "max elevation per azimuth" value, TerraLab divides the horizon into **depth bands** for realistic atmospheric rendering:
+
+```python
+def generate_bands(n: int = 20, max_dist_m: float = 150_000) -> list:
+    """
+    Generates N horizon bands with piecewise logarithmic distribution:
+    - Near zone (0 → 5 km): 2/3 of bands (detailed foreground)
+    - Far zone (5 → 150 km): 1/3 of bands (atmospheric haze)
+    """
+    near_km = 5_000.0
+    near_frac = 2.0 / 3.0
+    
+    n_near = max(2, round(n * near_frac))  # e.g., 13 bands
+    n_far = max(1, n - n_near)             # e.g., 7 bands
+```
+
+Source: `TerraLab/terrain/engine.py:23-56`
+
+### Band Examples (20-band profile)
+
+| Band ID | Min Distance | Max Distance | Purpose |
+|---------|--------------|--------------|----------|
+| `gnd_1_250` | 0 m | 250 m | Immediate foreground (cliffs, trees) |
+| `near_750_1.5k` | 750 m | 1.5 km | Local hills |
+| `mid_5k_10k` | 5 km | 10 km | Nearby mountains |
+| `far_25k_50k` | 25 km | 50 km | Distant ranges (Pyrenees) |
+| `haze_100k_150k` | 100 km | 150 km | Atmospheric haze limit |
+
+Source: `TerraLab/terrain/engine.py:82-117`
+
+### Band Quality Presets
+
+```python
+generate_bands(n=10)   # Low    (fast baking, ~5s)
+generate_bands(n=20)   # Normal (default, ~15s)
+generate_bands(n=40)   # High   (detailed, ~30s)
+generate_bands(n=80)   # Ultra  (research, ~60s)
+```
+
+## DEM Data Pipeline
+
+### Tile Indexing
+
+TerraLab supports **tiled DEM** datasets (ICGC 5×5 km tiles):
+
+```python
+class TileIndex:
+    def __init__(self, tiles_dir: str):
+        # Scan all .txt/.asc/.npy files
+        # Build bounding box index
+        self.tiles = []
+        for fpath in glob("*.asc"):
+            header = self._read_header(fpath)
+            bbox = (xmin, ymin, xmax, ymax)  # UTM coordinates
+            self.tiles.append({"path": fpath, "bbox": bbox})
+```
+
+Source: `TerraLab/terrain/engine.py:203-265`
+
+### ESRI ASCII Grid Format
+
+DEM tiles use the standard format:
+
+```
+NCOLS         1000
+NROWS         1000
+XLLCENTER     420000.0
+YLLCENTER     4650000.0
+CELLSIZE      5.0
+NODATA_VALUE  -9999
+1205.3 1206.1 1207.8 ...
+```
+
+Parsing uses **pandas** for 100× speedup:
+
+```python
+df = pd.read_csv(
+    path, 
+    skiprows=header_lines, 
+    sep=r'\s+', 
+    header=None, 
+    dtype=np.float32, 
+    engine='c'
+)
+data = df.values.reshape((nrows, ncols))
+```
+
+Source: `TerraLab/terrain/engine.py:428-454`
+
+### Binary Caching
+
+Parsed tiles are saved as `.npy` for instant reload:
+
+```python
+np.save("tile_420000_4650000.npy", data)
+# Next startup: np.load() in <10ms vs pandas parsing ~500ms
+```
+
+Source: `TerraLab/terrain/engine.py:398-407, 457-460`
+
+## Bilinear Interpolation
+
+Elevation sampling uses **bilinear interpolation** for sub-pixel precision:
+
+```python
+def sample(self, x: float, y: float) -> float:
+    # Convert UTM to grid coordinates
+    grid_x = (x - x0) / cellsize
+    grid_row = (nrows - 1) - (y - y0) / cellsize
+    
+    # Get 4 corners
+    c0, r0 = int(floor(grid_x)), int(floor(grid_row))
+    v00 = data[r0, c0]
+    v01 = data[r0, c0 + 1]
+    v10 = data[r0 + 1, c0]
+    v11 = data[r0 + 1, c0 + 1]
+    
+    # Bilinear weights
+    dx = grid_x - c0
+    dy = grid_row - r0
+    top = v00 * (1 - dx) + v01 * dx
+    bot = v10 * (1 - dx) + v11 * dx
+    return top * (1 - dy) + bot * dy
+```
+
+Source: `TerraLab/terrain/engine.py:561-582`
+
+<Note>
+Bilinear interpolation smooths the horizon profile and prevents "staircase" artifacts when raycasting at oblique angles.
+</Note>
+
+## Adaptive Stepping
+
+The raycasting step size adapts to distance for efficiency:
+
+```python
+# Start with sub-meter resolution
+NEAR_START = 0.5  # meters
+NEAR_FACTOR = 1.50  # geometric growth
+
+while d < step_m:
+    d = min(d * NEAR_FACTOR, step_m)  # 0.5 → 0.75 → 1.125 → ... → 50m
+
+# Then switch to linear stepping
+if d < 3_000:
+    d += step_m          # 50m steps
+elif d < 15_000:
+    d += step_m * 2      # 100m steps
+else:
+    d += step_m * 4      # 200m steps
+```
+
+Source: `TerraLab/terrain/engine.py:725-790`
+
+**Rationale**:
+- **Near field** (0–50m): Geometric growth captures cliffs/walls at observer's feet
+- **Mid field** (50m–3km): Fine steps for detailed local topography
+- **Far field** (>15km): Coarse steps acceptable due to atmospheric blur
+
+## Light Pollution Occlusion
+
+During raycasting, the engine samples **light pollution domes** and accumulates their contribution per azimuth:
+
+```python
+if light_sampler is not None and (d - last_light_d) >= 2000.0:
+    rad = light_sampler.get_radiance_utm(x, y)  # DVNL radiance
+    
+    if rad > 0.1:  # Significant light source
+        dist_mult = 1.0 / max(1.0, d / 1000.0)  # Inverse distance law
+        
+        # Liberal occlusion: allow light up to 10° below horizon
+        if ang > (max_ang_so_far - 0.17):  # ~10 degrees
+            light_domes[i] += rad * dist_mult * 20.0
+```
+
+Source: `TerraLab/terrain/engine.py:747-772`
+
+This produces per-azimuth light intensity arrays used by the astronomical renderer to compute **directional limiting magnitude**.
+
+## Profile Serialization
+
+Baked profiles are saved as compressed NumPy archives:
+
+```python
+profile.save("horizon_lleida.npz")
+
+# File contents:
+{
+    "azimuths": [0.0, 0.5, 1.0, ..., 359.5],  # degrees
+    "observer_lat": 41.6175,
+    "observer_lon": 0.6200,
+    "n_bands": 20,
+    "band_0_id": "gnd_1_250",
+    "band_0_angles": [0.02, 0.03, ...],       # radians
+    "band_0_dists": [150, 200, ...],          # meters
+    "band_0_heights": [1205, 1210, ...],      # meters
+    "light_domes": [0.5, 1.2, ...],           # accumulated radiance
+    ...
+}
+```
+
+Source: `TerraLab/terrain/engine.py:155-196`
+
+## Performance
+
+### Benchmarks (AMD Ryzen 7 5800H)
+
+| Configuration | Azimuths | Bands | Max Distance | Time |
+|---------------|----------|-------|--------------|------|
+| **Fast** | 360 (1° res) | 10 | 50 km | ~3s |
+| **Normal** | 720 (0.5° res) | 20 | 100 km | ~15s |
+| **High** | 1440 (0.25° res) | 40 | 150 km | ~45s |
+| **Ultra** | 1440 | 80 | 200 km | ~90s |
+
+### Bottlenecks
+
+1. **DEM I/O**: First parse of ASCII tiles (~500ms each)
+   - **Mitigation**: Binary `.npy` cache reduces to under 10ms
+
+2. **Tile Cache Misses**: Searching index for each sample
+   - **Mitigation**: Spatial coherence optimization (last_tile)
+
+3. **Python GIL**: Single-threaded raycasting loop
+   - **Future**: Parallelize azimuth chunks via `multiprocessing`
+
+Source: `TerraLab/terrain/engine.py:707-809`
+
+## API Reference
+
+### Main Entry Point
+
+```python
+from TerraLab.terrain.engine import bake_and_save
+
+profile = bake_and_save(
+    lat=41.6175,           # Observer latitude (WGS84)
+    lon=0.6200,            # Observer longitude
+    tiles_dir="/data/terrain/",
+    output_path="horizon.npz",
+    radius=100_000,        # Max distance (meters)
+    step_m=50,             # Base step size
+    resolution_deg=0.5,    # Azimuth resolution
+    eye_height=1.7,        # Observer eye height (meters)
+    band_defs=None         # Use DEFAULT_BANDS (20)
+)
+```
+
+Source: `TerraLab/terrain/engine.py:816-873`
+
+### Classes
+
+- **`HorizonBaker`**: Core raycasting engine
+- **`TileIndex`**: Spatial index for DEM tiles
+- **`TileCache`**: LRU cache with binary serialization
+- **`DemSampler`**: Bilinear elevation interpolation
+- **`HorizonProfile`**: Serializable result container
+
+## Next Steps
+
+- [Light Pollution](/concepts/light-pollution) - How DVNL radiance affects limiting magnitude
+- [Astronomical Rendering](/concepts/astronomical-rendering) - Using horizon profiles for occlusion

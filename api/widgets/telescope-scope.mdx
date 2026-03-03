@@ -1,0 +1,372 @@
+---
+title: "TelescopeScopeController"
+description: "Telescope framing and field-of-view controller for the sky widget"
+---
+
+## Overview
+
+The `TelescopeScopeController` class provides telescope/camera framing visualization with interactive field-of-view controls. It supports circular and rectangular framing modes with configurable focal length, sensor size, and movement controls.
+
+## Class Definition
+
+```python
+from TerraLab.widgets.telescope_scope_mode import TelescopeScopeController
+```
+
+## Constants
+
+### Shape Types
+- `SHAPE_CIRCLE: str = "circle"` - Circular field-of-view
+- `SHAPE_RECT: str = "rectangle"` - Rectangular field-of-view
+
+### Speed Modes
+- `SPEED_SLOW: str = "slow"` - Slow, precise movement
+- `SPEED_FAST: str = "fast"` - Fast movement
+
+### Movement Rates
+- `SLOW_HOLD_DEG_PER_S: float = 0.5 / 60.0` - Slow continuous movement rate (0.5 arcmin/s)
+- `FAST_HOLD_DEG_PER_S: float = 0.5` - Fast continuous movement rate (0.5 deg/s)
+- `SLOW_STEP_DEG: float = 0.05 / 60.0` - Slow single step size (0.05 arcmin)
+- `FAST_STEP_DEG: float = 0.05` - Fast single step size (0.05 deg)
+
+## SkyCoord Type
+
+```python
+SkyCoord = Tuple[float, float]  # (alt_deg, az_deg)
+```
+Represents a sky coordinate in horizontal (alt-azimuth) system.
+
+## SensorPreset Dataclass
+
+```python
+@dataclass
+class SensorPreset:
+    key: str          # Preset identifier
+    width_mm: float   # Sensor width in millimeters
+    height_mm: float  # Sensor height in millimeters
+```
+
+### Available Presets
+
+```python
+SENSOR_PRESETS: Dict[str, SensorPreset] = {
+    "tiny": SensorPreset("tiny", 5.37, 4.04),              # ~1/2.8" sensor
+    "aps_c": SensorPreset("aps_c", 23.6, 15.7),            # APS-C sensor
+    "full_frame": SensorPreset("full_frame", 36.0, 24.0),  # Full-frame sensor
+}
+```
+
+## Constructor
+
+```python
+TelescopeScopeController()
+```
+
+Creates a new telescope scope controller with default settings.
+
+## Attributes
+
+- `enabled: bool` - Whether scope mode is active
+- `awaiting_center_click: bool` - Waiting for user to set center point
+- `shape: str` - Current shape mode (SHAPE_CIRCLE or SHAPE_RECT)
+- `speed_mode: str` - Current speed mode (SPEED_SLOW or SPEED_FAST)
+- `focal_mm: float` - Focal length in millimeters (default: 250.0)
+- `sensor_key: str` - Selected sensor preset key (default: "tiny")
+- `aspect_ratio_override: Optional[float]` - Custom aspect ratio (width/height) for rectangle mode
+- `center: Optional[SkyCoord]` - Current scope center position in sky coordinates
+- `dragging: bool` - Whether user is currently dragging the scope
+- `last_mouse: QPointF` - Last mouse position during drag
+- `manual_override: Optional[Tuple[float, float]]` - Manual FOV override (width_deg, height_deg)
+
+## Methods
+
+### Activation and Configuration
+
+```python
+activate() -> None
+```
+Activates telescope scope mode and sets awaiting_center_click flag.
+
+---
+
+```python
+deactivate() -> None
+```
+Deactivates telescope scope mode and resets interaction state.
+
+---
+
+```python
+set_shape(shape: str) -> None
+```
+Sets the framing shape.
+
+**Parameters:**
+- `shape` (str) - Must be SHAPE_CIRCLE or SHAPE_RECT
+
+---
+
+```python
+set_speed_mode(mode: str) -> None
+```
+Sets the movement speed mode.
+
+**Parameters:**
+- `mode` (str) - Must be SPEED_SLOW or SPEED_FAST
+
+---
+
+```python
+set_focal_mm(focal_mm: float) -> None
+```
+Sets the focal length.
+
+**Parameters:**
+- `focal_mm` (float) - Focal length in millimeters (minimum: 1.0)
+
+---
+
+```python
+set_sensor_key(key: str) -> None
+```
+Sets the sensor preset.
+
+**Parameters:**
+- `key` (str) - Sensor preset key from SENSOR_PRESETS
+
+---
+
+```python
+set_aspect_ratio(ratio: Optional[float]) -> None
+```
+Sets custom aspect ratio for rectangle mode.
+
+**Parameters:**
+- `ratio` (Optional[float]) - Aspect ratio (width/height), clamped to 0.2-5.0 range, or None to use sensor dimensions
+
+---
+
+```python
+set_manual_fov(width_deg: float, height_deg: Optional[float] = None) -> None
+```
+Overrides calculated FOV with manual values.
+
+**Parameters:**
+- `width_deg` (float) - Field-of-view width in degrees
+- `height_deg` (Optional[float]) - Field-of-view height in degrees (defaults to width_deg if None)
+
+---
+
+```python
+clear_manual_fov() -> None
+```
+Clears manual FOV override and returns to calculated FOV based on focal length and sensor.
+
+---
+
+### Field of View Calculations
+
+```python
+current_fov() -> Tuple[float, float]
+```
+Calculates current field-of-view dimensions.
+
+**Returns:**
+- Tuple of (width_deg: FOV width in degrees, height_deg: FOV height in degrees)
+
+**Note:** Applies aspect_ratio_override if set and shape is SHAPE_RECT.
+
+---
+
+```python
+short_step_deg() -> float
+```
+Gets the current step size based on speed mode.
+
+**Returns:**
+- float - Step size in degrees (SLOW_STEP_DEG or FAST_STEP_DEG)
+
+---
+
+```python
+hold_rate_deg_per_s() -> float
+```
+Gets the current continuous movement rate based on speed mode.
+
+**Returns:**
+- float - Movement rate in degrees per second (SLOW_HOLD_DEG_PER_S or FAST_HOLD_DEG_PER_S)
+
+---
+
+### Interaction Methods
+
+```python
+handle_click(sx: float, sy: float, unproject_fn: Callable) -> bool
+```
+Handles mouse click to set scope center.
+
+**Parameters:**
+- `sx` (float) - Screen X coordinate
+- `sy` (float) - Screen Y coordinate
+- `unproject_fn` (Callable) - Function to convert screen coords to sky coords
+
+**Returns:**
+- bool - True if event was consumed
+
+---
+
+```python
+set_center(sky: SkyCoord) -> None
+```
+Directly sets the scope center position.
+
+**Parameters:**
+- `sky` (SkyCoord) - Sky coordinates (alt_deg, az_deg)
+
+---
+
+```python
+start_drag(sx: float, sy: float) -> None
+```
+Begins drag interaction.
+
+**Parameters:**
+- `sx` (float) - Screen X coordinate
+- `sy` (float) - Screen Y coordinate
+
+---
+
+```python
+drag_move(sx: float, sy: float, unproject_fn: Callable) -> bool
+```
+Updates scope center during drag operation.
+
+**Parameters:**
+- `sx` (float) - Screen X coordinate
+- `sy` (float) - Screen Y coordinate
+- `unproject_fn` (Callable) - Function to convert screen coords to sky coords
+
+**Returns:**
+- bool - True if event was consumed
+
+**Note:** Implements camera-like drag behavior where mouse movement displaces target in opposite direction.
+
+---
+
+```python
+end_drag() -> None
+```
+Ends drag interaction.
+
+---
+
+```python
+nudge(d_alt_deg: float, d_az_deg: float) -> None
+```
+Nudges the scope center by specified offsets.
+
+**Parameters:**
+- `d_alt_deg` (float) - Altitude offset in degrees
+- `d_az_deg` (float) - Azimuth offset in degrees
+
+---
+
+### Rendering
+
+```python
+draw(
+    painter: QPainter,
+    width: int,
+    height: int,
+    project_fn: Callable[[float, float], Optional[Tuple[float, float]]],
+    hud_extra_lines: Optional[List[str]] = None
+) -> None
+```
+Draws the telescope scope overlay with darkened outside area, boundary, crosshair, and HUD.
+
+**Parameters:**
+- `painter` (QPainter) - Qt painter object
+- `width` (int) - Viewport width in pixels
+- `height` (int) - Viewport height in pixels
+- `project_fn` (Callable) - Function to project sky coords (alt, az) to screen coords (x, y)
+- `hud_extra_lines` (Optional[List[str]]) - Additional HUD text lines to display
+
+**Note:** Draws a dark overlay outside the FOV boundary. HUD is split into left panel (scope info + RA/Dec) and right panel (optical/atmospheric telemetry).
+
+---
+
+## Usage Example
+
+```python
+from TerraLab.widgets.telescope_scope_mode import TelescopeScopeController, SENSOR_PRESETS
+from PyQt5.QtGui import QPainter
+
+# Create controller
+scope = TelescopeScopeController()
+
+# Configure telescope
+scope.set_focal_mm(1000.0)  # 1000mm focal length
+scope.set_sensor_key("aps_c")  # APS-C sensor
+scope.set_shape(scope.SHAPE_RECT)  # Rectangular framing
+scope.set_speed_mode(scope.SPEED_SLOW)  # Precise movement
+
+# Activate scope mode
+scope.activate()
+
+# Set center programmatically
+scope.set_center((45.0, 180.0))  # Alt=45°, Az=180° (South)
+
+# Or let user click to set center
+# scope.handle_click(screen_x, screen_y, unproject_function)
+
+# Calculate FOV
+fov_w, fov_h = scope.current_fov()
+print(f"FOV: {fov_w:.3f}° x {fov_h:.3f}°")
+print(f"FOV: {fov_w*60:.1f}' x {fov_h*60:.1f}'")
+
+# Nudge position
+scope.nudge(d_alt_deg=0.1, d_az_deg=0.0)  # Move up 0.1°
+
+# Get movement rates
+step = scope.short_step_deg()
+rate = scope.hold_rate_deg_per_s()
+print(f"Step: {step*60:.2f}', Rate: {rate*60:.2f}'/s")
+
+# Draw in paintEvent
+def paintEvent(event):
+    painter = QPainter(widget)
+    # ... draw sky first ...
+    
+    # Draw scope overlay
+    scope.draw(
+        painter,
+        width=widget.width(),
+        height=widget.height(),
+        project_fn=my_projection_function,
+        hud_extra_lines=["RA: 12h 34m 56s", "Dec: +45° 12' 34\"", "Seeing: 2.1\""]
+    )
+```
+
+## Custom Sensor Example
+
+```python
+# Manual FOV override (bypasses focal/sensor calculation)
+scope.set_manual_fov(width_deg=2.5, height_deg=1.5)
+
+# Custom aspect ratio with standard sensor
+scope.set_sensor_key("full_frame")
+scope.set_aspect_ratio(16/9)  # Override to 16:9 for video framing
+
+# Return to sensor-based aspect ratio
+scope.set_aspect_ratio(None)
+```
+
+## Integration Notes
+
+- The controller handles all FOV calculations, interaction logic, and rendering
+- Requires `unproject_fn` to convert screen coordinates to sky coordinates (alt, az)
+- Requires `project_fn` to convert sky coordinates to screen coordinates (x, y)
+- Uses `screen_to_sky()` from `spherical_math` module internally
+- Boundaries are rendered using geodesic arcs via `slerp_arc_points()` for spherical accuracy
+- HUD panels automatically reposition to avoid overlapping the scope center
+- Dark overlay uses QPainterPath subtraction to preserve interior clarity

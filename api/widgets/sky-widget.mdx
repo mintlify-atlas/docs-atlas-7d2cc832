@@ -1,0 +1,401 @@
+---
+title: "AstronomicalWidget"
+description: "Main rendering widget for the TerraLab sky visualization canvas"
+---
+
+## Overview
+
+The `AstronomicalWidget` class (defined in `widgets/sky_widget.py`) is the primary rendering widget for TerraLab's astronomical visualization system. It provides real-time sky rendering with celestial objects, atmospheric effects, and interactive controls.
+
+## Class Definition
+
+```python
+from TerraLab.widgets.sky_widget import AstronomicalWidget
+```
+
+## Key Components
+
+### Helper Classes
+
+#### ClickableLabel
+
+A clickable QLabel widget that emits signals when pressed.
+
+**Signals:**
+- `clicked: pyqtSignal()` - Emitted when the label is clicked
+
+**Methods:**
+- `mousePressEvent(event)` - Handles mouse press events and emits the clicked signal
+
+---
+
+#### AstroEngine
+
+High-precision astronomical calculation engine based on Meeus/ELP 2000-82 and VSOP87 algorithms.
+
+**Constants:**
+- `DEG_TO_RAD: float` - π/180.0
+- `RAD_TO_DEG: float` - 180.0/π
+- `AU_IN_KM: float` - 149597870.7
+- `EARTH_RADIUS_KM: float` - 6378.14
+
+**Static Methods:**
+
+```python
+@staticmethod
+get_julian_century(dt_utc: datetime) -> Tuple[float, float]
+```
+Converts UTC datetime to Julian century (T) and Julian Day (JD). Applies Delta T correction (~72s for 2026).
+
+**Parameters:**
+- `dt_utc` (datetime) - UTC datetime object
+
+**Returns:**
+- Tuple of (T: Julian century from J2000.0, jd: Julian Day)
+
+---
+
+```python
+@staticmethod
+normalize(angle: float) -> float
+```
+Normalizes angle to 0-360° range.
+
+**Parameters:**
+- `angle` (float) - Angle in degrees
+
+**Returns:**
+- float - Normalized angle (0-360°)
+
+---
+
+```python
+@staticmethod
+get_moon_position_elp(T: float) -> Tuple[float, float, float]
+```
+Calculates Moon position using ELP 2000-82 truncated algorithm with major periodic terms.
+
+**Parameters:**
+- `T` (float) - Julian centuries from J2000.0
+
+**Returns:**
+- Tuple of (longitude: geocentric ecliptic longitude in degrees, latitude: ecliptic latitude in degrees, distance: Earth-Moon distance in km)
+
+---
+
+```python
+@staticmethod
+get_sun_position_vsop(T: float) -> Tuple[float, float, float]
+```
+Calculates Sun position using VSOP87 algorithm.
+
+**Parameters:**
+- `T` (float) - Julian centuries from J2000.0
+
+**Returns:**
+- Tuple of (true_longitude: ecliptic longitude in degrees, 0.0: ecliptic latitude (always 0 for Sun), distance: Earth-Sun distance in km)
+
+---
+
+```python
+@staticmethod
+ecliptic_to_equatorial(lon: float, lat: float, T: float) -> Tuple[float, float]
+```
+Transforms ecliptic coordinates to equatorial coordinates.
+
+**Parameters:**
+- `lon` (float) - Ecliptic longitude in degrees
+- `lat` (float) - Ecliptic latitude in degrees
+- `T` (float) - Julian centuries from J2000.0
+
+**Returns:**
+- Tuple of (ra: right ascension in degrees, dec: declination in degrees)
+
+---
+
+```python
+@staticmethod
+get_topocentric_position(
+    ra_geo: float,
+    dec_geo: float,
+    dist_km: float,
+    obs_lat: float,
+    obs_lon: float,
+    jd: float
+) -> Tuple[float, float, float]
+```
+Converts geocentric coordinates to topocentric (observer-relative) coordinates with parallax correction.
+
+**Parameters:**
+- `ra_geo` (float) - Geocentric right ascension in degrees
+- `dec_geo` (float) - Geocentric declination in degrees
+- `dist_km` (float) - Distance from Earth center in km
+- `obs_lat` (float) - Observer latitude in degrees
+- `obs_lon` (float) - Observer longitude in degrees
+- `jd` (float) - Julian Day
+
+**Returns:**
+- Tuple of (ra_topo: topocentric RA in degrees, dec_topo: topocentric Dec in degrees, lst: local sidereal time in degrees)
+
+---
+
+```python
+@staticmethod
+get_planet_heliocentric(name: str, T: float) -> Tuple[float, float, float]
+```
+Calculates heliocentric coordinates for planets using simplified VSOP87 mean elements.
+
+**Parameters:**
+- `name` (str) - Planet name: 'mercury', 'venus', 'mars', 'jupiter', 'saturn'
+- `T` (float) - Julian centuries from J2000.0
+
+**Returns:**
+- Tuple of (L_hel: heliocentric longitude in degrees, B_hel: heliocentric latitude in degrees, R_hel: radius vector in AU)
+
+---
+
+```python
+@staticmethod
+get_planet_geocentric(
+    p_L: float,
+    p_B: float,
+    p_R: float,
+    earth_L: float,
+    earth_B: float,
+    earth_R: float
+) -> Tuple[float, float, float]
+```
+Converts heliocentric planet position to geocentric coordinates.
+
+**Parameters:**
+- `p_L` (float) - Planet heliocentric longitude in degrees
+- `p_B` (float) - Planet heliocentric latitude in degrees
+- `p_R` (float) - Planet radius vector in AU
+- `earth_L` (float) - Earth heliocentric longitude in degrees
+- `earth_B` (float) - Earth heliocentric latitude in degrees
+- `earth_R` (float) - Earth radius vector in AU
+
+**Returns:**
+- Tuple of (longitude: geocentric ecliptic longitude in degrees, latitude: geocentric ecliptic latitude in degrees, delta: Earth-planet distance in AU)
+
+---
+
+```python
+@staticmethod
+calculate_satellite_magnitude(
+    sat_range_km: float,
+    phase_angle_rad: float,
+    std_mag: float = -1.8
+) -> float
+```
+Calculates satellite visual magnitude using standard magnitude model with phase function.
+
+**Parameters:**
+- `sat_range_km` (float) - Distance to satellite in km
+- `phase_angle_rad` (float) - Phase angle in radians (0 = full, π = new)
+- `std_mag` (float) - Standard magnitude at 1000km, default -1.8
+
+**Returns:**
+- float - Calculated visual magnitude
+
+---
+
+### RusticTimeBar
+
+A custom time control widget displaying a 24-hour timeline with sun altitude-based coloring.
+
+**Signals:**
+- `valueChanged: pyqtSignal(float)` - Emitted when time value changes, passes hour value (0-24)
+
+**Constructor:**
+```python
+RusticTimeBar(parent=None)
+```
+
+**Attributes:**
+- `current_hour: float` - Current hour value (0-24)
+- `lat: float` - Observer latitude in degrees
+- `lon: float` - Observer longitude in degrees
+- `day_of_year: int` - Day of year (1-365)
+
+**Methods:**
+
+```python
+set_time(hour: float) -> None
+```
+Sets the current time.
+
+**Parameters:**
+- `hour` (float) - Hour value (0-24), automatically normalized to 0-24 range
+
+---
+
+```python
+update_params(lat: float, lon: float, day_of_year: int) -> None
+```
+Updates observer parameters for sun altitude calculations.
+
+**Parameters:**
+- `lat` (float) - Latitude in degrees
+- `lon` (float) - Longitude in degrees
+- `day_of_year` (int) - Day of year (1-365)
+
+---
+
+```python
+get_sun_alt_fast(hour: float, lat: float, lon: float, day: int) -> float
+```
+Quickly calculates sun altitude for a given hour.
+
+**Parameters:**
+- `hour` (float) - Local hour (0-24)
+- `lat` (float) - Latitude in degrees
+- `lon` (float) - Longitude in degrees
+- `day` (int) - Day of year
+
+**Returns:**
+- float - Sun altitude in degrees
+
+---
+
+### Background Workers
+
+#### CatalogLoaderWorker
+
+Background worker for loading star catalogs without freezing the UI. Supports both JSON and binary NumPy cache formats.
+
+**Signals:**
+- `catalog_ready: pyqtSignal(list, object, object, object, object, object, object)` - Emitted when catalog is loaded. Parameters: (celestial_objects, np_ra, np_dec, np_mag, np_r, np_g, np_b)
+
+**Slots:**
+
+```python
+@pyqtSlot(str)
+load(json_path: str) -> None
+```
+Loads star catalog from JSON file or binary cache.
+
+**Parameters:**
+- `json_path` (str) - Path to JSON catalog file
+
+---
+
+#### SkyfieldLoaderWorker
+
+Background worker for loading Skyfield ephemeris data.
+
+**Signals:**
+- `skyfield_ready: pyqtSignal(object, object)` - Emitted when Skyfield is initialized. Parameters: (ts: timescale, eph: ephemeris)
+
+**Slots:**
+
+```python
+@pyqtSlot()
+load() -> None
+```
+Loads Skyfield timescale and ephemeris (de421.bsp).
+
+---
+
+#### StarRenderWorker
+
+Background worker for rendering stars to QImage with atmospheric extinction, refraction, and light pollution effects.
+
+**Signals:**
+- `result_ready: pyqtSignal(QImage, list)` - Emitted when star rendering completes. Parameters: (image: QImage, visible_stars: list of (x, y, object) tuples)
+- `trails_ready: pyqtSignal(QImage)` - Emitted when star trail rendering completes. Parameters: (image: QImage)
+
+**Slots:**
+
+```python
+@pyqtSlot(dict)
+render(params: dict) -> None
+```
+Renders stars to QImage using vectorized NumPy operations.
+
+**Parameters:**
+- `params` (dict) - Rendering parameters including:
+  - `width` (int) - Image width in pixels
+  - `height` (int) - Image height in pixels
+  - `zoom_level` (float) - Zoom factor
+  - `vertical_ratio` (float) - Vertical offset ratio
+  - `elevation_angle` (float) - Camera elevation in degrees
+  - `azimuth_offset` (float) - Camera azimuth in degrees
+  - `ra`, `dec`, `mag`, `r`, `g`, `b` (np.ndarray) - Star data arrays
+  - `lst` (float) - Local sidereal time in degrees
+  - `lat_rad` (float) - Observer latitude in radians
+  - `mag_limit` (float) - Magnitude limit for visibility
+  - `star_scale` (float) - Star size scaling factor
+  - `bortle` (int) - Bortle scale value (1-9)
+  - `is_auto` (bool) - Auto mode flag
+  - `extinction_coeff` (float) - Atmospheric extinction coefficient
+  - `horizon_profile` (object) - Horizon profile with light_domes data
+  - `pure_colors` (bool) - Use legacy pure color rendering (no bloom)
+  - `spike_threshold` (float) - Magnitude threshold for diffraction spikes
+  - `cel_objs_ref` (list) - Reference to celestial objects list
+
+---
+
+```python
+@pyqtSlot(dict)
+render_trails(params: dict) -> None
+```
+Renders star trails to QImage.
+
+**Parameters:**
+- `params` (dict) - Trail rendering parameters including all render() params plus:
+  - `start_hour` (float) - Trail start hour
+  - `end_hour` (float) - Trail end hour
+  - `day_of_year` (int) - Day of year
+  - `longitude` (float) - Observer longitude
+  - `is_moving` (bool) - Quality mode flag
+
+---
+
+## Usage Example
+
+```python
+from PyQt5.QtCore import QThread
+from TerraLab.widgets.sky_widget import (
+    AstroEngine,
+    RusticTimeBar,
+    CatalogLoaderWorker,
+    StarRenderWorker
+)
+from datetime import datetime, timezone
+
+# Calculate Moon position
+dt = datetime.now(timezone.utc)
+T, jd = AstroEngine.get_julian_century(dt)
+lon, lat, dist = AstroEngine.get_moon_position_elp(T)
+print(f"Moon: Lon={lon:.2f}° Lat={lat:.2f}° Dist={dist:.0f}km")
+
+# Convert to equatorial coordinates
+ra, dec = AstroEngine.ecliptic_to_equatorial(lon, lat, T)
+print(f"Moon RA={ra:.2f}° Dec={dec:.2f}°")
+
+# Create time bar widget
+time_bar = RusticTimeBar()
+time_bar.update_params(lat=40.0, lon=-3.0, day_of_year=100)
+time_bar.set_time(12.5)  # 12:30 PM
+time_bar.valueChanged.connect(lambda hour: print(f"Time: {hour:.2f}h"))
+
+# Load star catalog in background
+loader_worker = CatalogLoaderWorker()
+loader_thread = QThread()
+loader_worker.moveToThread(loader_thread)
+loader_worker.catalog_ready.connect(
+    lambda objs, ra, dec, mag, r, g, b: print(f"Loaded {len(objs)} stars")
+)
+loader_thread.started.connect(lambda: loader_worker.load("/path/to/catalog.json"))
+loader_thread.start()
+```
+
+## Notes
+
+- The `AstroEngine` uses high-precision algorithms suitable for professional astronomical applications
+- Star rendering is performed in background threads to maintain UI responsiveness
+- NumPy is required for vectorized star rendering operations
+- Atmospheric effects include extinction (airmass), refraction, and local light pollution
+- Diffraction spikes are rendered for bright stars (magnitude < spike_threshold)
+- Binary cache files (.npy) are automatically generated to speed up subsequent catalog loads

@@ -1,0 +1,438 @@
+---
+title: Measurement Tools
+description: Angular measurement tools including ruler, square, rectangle, and circle for precise sky measurements
+---
+
+# Measurement Tools
+
+TerraLab provides a suite of measurement tools for precise angular measurements on the celestial sphere. All measurements account for spherical geometry and great circle distances.
+
+## Available Tools
+
+Four measurement tool types are available:
+
+1. **Ruler**: Linear distance between two points
+2. **Square**: Fixed aspect ratio rectangle (1:1)
+3. **Rectangle**: Variable aspect ratio with rotation
+4. **Circle**: Circular area measurement
+
+**Source:** `measurement_tools.py:20-24`
+
+## Activating Measurement Tools
+
+To activate a tool:
+
+```python
+measurement_controller.set_tool(tool_name)
+```
+
+Where `tool_name` is one of:
+- `"ruler"`
+- `"square"`
+- `"rectangle"`
+- `"circle"`
+- `"none"` to deactivate
+
+**Keyboard Shortcuts:**
+- **Escape**: Cancel current measurement or deselect active tool
+- **Delete** or **Backspace**: Delete selected measurement
+
+## Ruler Tool
+
+Measures the great circle distance between two points on the celestial sphere.
+
+### Usage
+
+1. Select ruler tool
+2. Click first point (endpoint A)
+3. Move mouse to see preview line
+4. Click second point (endpoint B) to finalize
+
+### Measurement Display
+
+```
+Distance: 12.345deg
+```
+
+### Technical Details
+
+**Distance Calculation:**
+```python
+dist = angular_distance(point_a, point_b)
+```
+
+Uses the spherical law of cosines:
+```
+cos(d) = sin(alt1)×sin(alt2) + cos(alt1)×cos(alt2)×cos(az2-az1)
+```
+
+**Arc Rendering:**
+- Great circle arc interpolated with 72 points
+- Uses `slerp_arc_points()` for smooth spherical interpolation
+- Label positioned at arc midpoint
+
+**Source:** `measurement_tools.py:437-448`
+
+## Square Tool
+
+Creates a square measurement frame with equal width and height.
+
+### Usage
+
+1. Select square tool
+2. Click and drag from origin corner
+3. Release to finalize
+4. The larger dimension (width or height) is used for both
+
+### Measurement Display
+
+```
+Width: 5.000deg
+Height: 5.000deg
+Area: 25.000 deg2
+```
+
+### Technical Details
+
+**Area Calculation:**
+- Small-angle approximation: `area = width × height`
+- Sufficient for typical measurement scales (< 30°)
+- For exact spherical cap area, integration required
+
+**Corner Calculation:**
+- Four corners computed in local tangent plane
+- Projected to spherical coordinates
+- Each edge rendered with 24 interpolation points
+
+**Source:** `measurement_tools.py:478-516`
+
+## Rectangle Tool
+
+Creates a rectangular measurement frame with independent width/height and rotation capability.
+
+### Usage
+
+1. Select rectangle tool
+2. Click and drag to define initial rectangle
+3. Use rotation handle to adjust orientation
+4. Drag corner handles to resize
+5. Drag body to move entire rectangle
+
+### Measurement Display
+
+```
+Width: 8.250deg
+Height: 5.500deg
+Area: 45.375 deg2
+```
+
+### Rotation Control
+
+Rectangle mode includes a rotation handle:
+- Handle appears above the top edge midpoint
+- Offset distance: `height/2 + max(0.15°, 15% of max dimension)`
+- Drag handle to rotate frame around center
+- Rotation angle stored in `rotation_deg` property (-180° to +180°)
+
+**Visual Indicator:**
+- Dashed line connects top edge midpoint to rotation handle
+- Rendered with 8 interpolation points
+
+**Implementation:** `measurement_tools.py:413-422`
+
+### Technical Details
+
+**Local Coordinate System:**
+- Center point defines local tangent plane origin
+- X-axis: Azimuth direction (scaled by cos(altitude))
+- Y-axis: Altitude direction
+- Rotation applied before projection to sky coordinates
+
+**Rotation Math:**
+```python
+xr = x × cos(θ) - y × sin(θ)
+yr = x × sin(θ) + y × cos(θ)
+```
+
+**Source:** `measurement_tools.py:654-657`
+
+## Circle Tool
+
+Measures circular areas on the sky, useful for estimating nebula sizes or galaxy extents.
+
+### Usage
+
+1. Select circle tool
+2. Click center point
+3. Drag to edge point (defines radius)
+4. Release to finalize
+
+### Measurement Display
+
+```
+Diameter: 3.250deg  |  Area: 8.296 deg2
+```
+
+### Handle Types
+
+**Center Handle:**
+- Drag to move entire circle
+- Preserves radius
+
+**Edge Handle:**
+- Drag to change radius
+- Center remains fixed
+
+### Technical Details
+
+**Radius Calculation:**
+```python
+radius = angular_distance(center, edge_point)
+```
+
+**Boundary Rendering:**
+- 128 interpolation points around circumference
+- Each point computed via `destination_point(center, bearing, radius)`
+- Bearing varies from 0° to 360°
+
+**Area Approximation:**
+```python
+area = π × radius²
+```
+
+Small-angle approximation (accurate for r < 10°)
+
+**Source:** `measurement_tools.py:450-476`
+
+## Interaction Modes
+
+### Creating Measurements
+
+Drag mode: `DRAG_CREATING`
+- Active while mouse button is held during initial creation
+- Preview shown in real-time with reduced opacity (140 alpha)
+- Finalized on mouse release
+
+### Selecting Measurements
+
+Click on existing measurement to select:
+- Changes to golden highlight color
+- Shows resize/rotation handles
+- Enables delete and modification operations
+
+**Hit Detection:**
+- Body hit: Click within 8px of measurement stroke
+- Handle hit: Click within 12px of handle center
+- Handles prioritized over body
+- Most recent measurement prioritized in overlap
+
+**Source:** `measurement_tools.py:345-377`
+
+### Moving Measurements
+
+Drag mode: `DRAG_MOVING`
+- Initiated by clicking measurement body (not handle)
+- Camera-like inverse motion
+- All vertices translated by delta altitude and azimuth
+- Azimuth delta uses signed angular difference to handle 0°/360° wrap
+
+**Implementation:** `measurement_tools.py:379-384`
+
+### Resizing Measurements
+
+Drag mode: `DRAG_RESIZING`
+- Initiated by clicking and dragging a handle
+- Active resize handle stored in `resize_handle` property
+- Behavior varies by measurement type:
+
+**Ruler:**
+- Handle "a": Move first endpoint
+- Handle "b": Move second endpoint
+
+**Circle:**
+- Handle "center": Move both center and edge (preserves radius)
+- Handle "edge": Change radius (center fixed)
+
+**Rectangle/Square:**
+- Handle "origin": Move bottom-left corner
+- Handle "corner": Move top-right corner
+- Handle "rotate": Change orientation (rectangle only)
+
+**Source:** `measurement_tools.py:386-422`
+
+## Visual Styling
+
+### Line Rendering
+
+**Normal State:**
+- Glow: White with 35% opacity, 3.0px width
+- Core: White with full opacity, 1.0px width
+
+**Selected State:**
+- Glow: Golden-white (#FFFFB4) with 45% opacity, 3.2px width
+- Core: Golden (#FFF578) with full opacity, 1.2px width
+
+**Source:** `measurement_tools.py:278-296`
+
+### Handle Rendering
+
+Resize handles (displayed only when selected):
+- Circle shape, 4.0px radius
+- Border: Golden (#FFF078), 1.1px width
+- Fill: Black with 200 alpha
+- Drawn only for selected measurement
+
+**Source:** `measurement_tools.py:298-315`
+
+### Label Boxes
+
+Measurement labels appear in compact HUD boxes:
+- Background: Black with 205 alpha, 5px corner radius
+- Text: White, multi-line support
+- Padding: 6px horizontal, 4px vertical
+- Max width: 320px (auto-sized to content)
+- Positioned 8px offset from anchor point
+
+**Source:** `measurement_tools.py:317-343`
+
+## Data Format
+
+Each measurement is stored as a `MeasurementItem` dataclass:
+
+```python
+@dataclass
+class MeasurementItem:
+    tool: str              # "ruler", "square", "rectangle", "circle"
+    a: SkyCoord            # First point (alt, az)
+    b: SkyCoord            # Second point (alt, az)
+    rotation_deg: float    # Rotation angle (rectangle only)
+```
+
+**SkyCoord** is a tuple: `(altitude_deg, azimuth_deg)`
+
+**Source:** `measurement_tools.py:32-39`
+
+## Spherical Geometry Functions
+
+### Angular Distance
+
+```python
+angular_distance(point1, point2) -> float
+```
+
+Returns great circle distance in degrees.
+
+### Destination Point
+
+```python
+destination_point(origin, bearing_deg, distance_deg) -> SkyCoord
+```
+
+Computes endpoint given origin, bearing, and distance.
+
+### Arc Interpolation
+
+```python
+slerp_arc_points(point1, point2, n_points) -> List[SkyCoord]
+```
+
+Generates n points along great circle arc using spherical linear interpolation (SLERP).
+
+### Screen-to-Sky Projection
+
+```python
+screen_to_sky(sx, sy, unproject_fn) -> Optional[SkyCoord]
+```
+
+Converts screen pixel coordinates to celestial coordinates using inverse stereographic projection.
+
+**Source:** `spherical_math.py` (imported in `measurement_tools.py:9-14`)
+
+## Coordinate Normalization
+
+All sky coordinates are normalized to valid ranges:
+
+```python
+def _norm(self, p: SkyCoord) -> SkyCoord:
+    alt = max(-89.9, min(89.9, float(p[0])))  # Avoid poles
+    az = float(p[1]) % 360.0                   # Wrap azimuth
+    return alt, az
+```
+
+**Source:** `measurement_tools.py:645-648`
+
+## Performance Optimization
+
+### Hit Testing
+
+Measurements tested in reverse order (most recent first) for intuitive selection behavior.
+
+### Polyline Distance
+
+Point-to-segment distance uses parametric line projection:
+```python
+t = max(0.0, min(1.0, (w·v) / (v·v)))
+```
+
+Where:
+- w = vector from segment start to test point
+- v = segment direction vector
+- t = clamped parameter [0,1]
+
+**Source:** `measurement_tools.py:613-626`
+
+### Polygon Fill Test
+
+Ray-casting algorithm for point-in-polygon (circle and rectangle interiors):
+- Cast ray from point to infinity
+- Count edge intersections
+- Odd count = inside, even count = outside
+
+**Source:** `measurement_tools.py:628-643`
+
+## Integration with Main Canvas
+
+Measurement tools integrate seamlessly with sky rendering:
+
+1. **Controller Instance**: Created in `AstronomicalWidget`
+2. **Event Routing**: Mouse events delegated to controller when tool active
+3. **Rendering**: Called from main `paintEvent` after star rendering
+4. **State Persistence**: Measurements stored in controller's `items` list
+
+### Clear All
+
+```python
+measurement_controller.clear()
+```
+
+Removes all measurements and resets controller state.
+
+### Delete Selected
+
+```python
+measurement_controller.delete_selected()
+```
+
+Removes currently selected measurement (keyboard: Delete/Backspace).
+
+## Practical Applications
+
+**Astrophotography Planning:**
+- Measure sensor FOV coverage of nebulae
+- Plan mosaic panel layouts
+- Estimate rotation for optimal framing
+
+**Visual Observing:**
+- Measure apparent separation of double stars
+- Estimate planetary disk diameters
+- Calculate eyepiece true field of view
+
+**Educational Use:**
+- Demonstrate celestial coordinate systems
+- Measure constellation dimensions
+- Calculate lunar and solar diameters (~ 0.5°)
+
+**Scientific Analysis:**
+- Measure meteor trail lengths
+- Estimate satellite transit paths
+- Measure auroral arc heights and extents

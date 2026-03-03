@@ -1,0 +1,85 @@
+---
+title: CLI Tools Overview
+description: Command-line utilities for processing DVNL data and calibrating SQM models
+---
+
+## Overview
+
+TerraLab provides a suite of command-line tools for processing Defense Meteorological Satellite Program (DMSP) Visible Near-infrared (DVNL) data and calibrating Sky Quality Meter (SQM) models. These tools are designed to work together in a pipeline for light pollution analysis.
+
+## When to Use CLI Tools
+
+Use the CLI tools when you need to:
+
+- **Batch process** large DVNL raster datasets
+- **Automate workflows** for light pollution mapping
+- **Calibrate models** from ground-truth SQM measurements
+- **Generate maps** of predicted sky brightness
+- **Preprocess data** outside the main TerraLab GUI application
+
+For interactive exploration and visualization, use the main TerraLab GUI application instead.
+
+## Available Commands
+
+All CLI tools are installed automatically when you install TerraLab. They are accessible from any terminal after installation.
+
+### Main Application
+
+- **`terralab`** - Launch the TerraLab GUI application
+
+### DVNL Processing
+
+- **`terralab-dvnl-preprocess`** - Validate and clean DVNL GeoTIFF files
+- **`terralab-dvnl-convolve`** - Apply radial kernel convolution to DVNL rasters
+
+### SQM Calibration
+
+- **`terralab-calibrate-sqm`** - Fit empirical model from ground-truth SQM data
+- **`terralab-predict-sqm`** - Generate SQM prediction maps from calibrated models
+
+## Typical Workflow
+
+1. **Preprocess** DVNL data to ensure proper formatting and NoData handling
+2. **Convolve** the preprocessed raster with a dispersion kernel (Gaussian or power-law)
+3. **Calibrate** a model using ground-truth SQM measurements (if available)
+4. **Predict** SQM values across the entire convolved raster
+
+```bash
+# Step 1: Preprocess raw DVNL data
+terralab-dvnl-preprocess raw_dvnl.tif clean_dvnl.tif
+
+# Step 2: Apply Gaussian kernel convolution
+terralab-dvnl-convolve clean_dvnl.tif convolved_dvnl.tif \
+  --kernel gaussian --sigma 30.0 --rmax 200.0
+
+# Step 3: Calibrate model from ground stations
+terralab-calibrate-sqm ground_truth.csv sqm_model.joblib
+
+# Step 4: Generate SQM prediction map
+terralab-predict-sqm convolved_dvnl.tif sqm_model.joblib sqm_map.tif
+```
+
+## Installation
+
+All CLI tools are installed automatically with TerraLab:
+
+```bash
+pip install terralab
+```
+
+For development installations:
+
+```bash
+pip install -e .
+```
+
+## Getting Help
+
+All commands support the `--help` flag to display usage information:
+
+```bash
+terralab-dvnl-preprocess --help
+terralab-dvnl-convolve --help
+terralab-calibrate-sqm --help
+terralab-predict-sqm --help
+```

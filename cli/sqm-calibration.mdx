@@ -1,0 +1,200 @@
+---
+title: SQM Calibration
+description: Tools for calibrating and applying SQM prediction models
+---
+
+## Overview
+
+The SQM calibration tools establish empirical relationships between satellite-derived radiance data and ground-truth Sky Quality Meter measurements, then apply these models to generate sky brightness maps.
+
+## terralab-calibrate-sqm
+
+Fits an empirical model between aggregated DVNL radiance and ground-truth SQM measurements.
+
+### Purpose
+
+- Train a robust regression model from field observations
+- Account for elevation effects on sky brightness
+- Use Huber loss for robustness to outliers
+- Evaluate model performance with MAE and RMSE metrics
+- Save trained models for reuse
+
+### Usage
+
+```bash
+terralab-calibrate-sqm <csv> <output>
+```
+
+### Arguments
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `csv` | Path | Yes | CSV file with calibration data |
+| `output` | Path | Yes | Path to save trained .joblib model |
+
+### Input CSV Format
+
+The input CSV must contain the following columns:
+
+| Column | Type | Units | Description |
+|--------|------|-------|-------------|
+| `lat` | Float | Degrees | Latitude of measurement location |
+| `lon` | Float | Degrees | Longitude of measurement location |
+| `agg_dvnl` | Float | nW/cm²/sr | Aggregated DVNL radiance value |
+| `elevation_m` | Float | Meters | Elevation above sea level |
+| `sqm` | Float | mag/arcsec² | Measured sky brightness |
+
+### Example CSV
+
+```csv
+lat,lon,agg_dvnl,elevation_m,sqm
+45.123,-110.456,12.5,1200.0,21.45
+46.789,-111.234,8.3,1500.0,21.78
+44.567,-109.876,25.7,900.0,20.12
+```
+
+### Examples
+
+**Basic calibration:**
+
+```bash
+terralab-calibrate-sqm ground_stations.csv regional_model.joblib
+```
+
+**Calibrate from multiple regions:**
+
+```bash
+# Combine multiple datasets
+cat region1.csv region2.csv region3.csv > combined_data.csv
+terralab-calibrate-sqm combined_data.csv national_model.joblib
+```
+
+### Output
+
+The command outputs:
+
+1. **Calibration metrics:**
+   - MAE (Mean Absolute Error) in mag/arcsec²
+   - RMSE (Root Mean Square Error) in mag/arcsec²
+
+2. **Saved model file:**
+   - .joblib format for use with `terralab-predict-sqm`
+
+**Example output:**
+
+```
+Loading data from ground_stations.csv...
+Fitting robust Huber model...
+Calibration metrics:
+  MAE: 0.245 mag/arcsec^2
+  RMSE: 0.312 mag/arcsec^2
+Model saved to regional_model.joblib
+```
+
+### Model Details
+
+- **Algorithm:** Huber regression (robust to outliers)
+- **Features:** Aggregated DVNL radiance, elevation
+- **Target:** SQM sky brightness (mag/arcsec²)
+- **Robustness:** Automatically handles measurement noise
+
+---
+
+## terralab-predict-sqm
+
+Applies a calibrated model to a convolved DVNL raster to produce a zenith SQM map.
+
+### Purpose
+
+- Generate wall-to-wall sky brightness predictions
+- Apply calibrated models across large geographic areas
+- Optionally incorporate elevation data
+- Produce publication-quality sky brightness maps
+
+### Usage
+
+```bash
+terralab-predict-sqm <input_agg> <model> <output> [OPTIONS]
+```
+
+### Arguments
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `input_agg` | Path | Yes | - | Convolved aggregated DVNL raster (.tif) |
+| `model` | Path | Yes | - | Path to calibrated .joblib model |
+| `output` | Path | Yes | - | Output SQM raster (.tif) |
+| `--elevation` | Float | No | `0.0` | Default elevation (m) if no DEM provided |
+
+### Examples
+
+**Basic prediction at sea level:**
+
+```bash
+terralab-predict-sqm convolved_dvnl.tif regional_model.joblib sqm_map.tif
+```
+
+**Prediction with default elevation:**
+
+```bash
+terralab-predict-sqm convolved_dvnl.tif regional_model.joblib sqm_map.tif \
+  --elevation 1500.0
+```
+
+**Complete pipeline:**
+
+```bash
+# 1. Preprocess
+terralab-dvnl-preprocess raw.tif clean.tif
+
+# 2. Convolve
+terralab-dvnl-convolve clean.tif convolved.tif --sigma 35.0
+
+# 3. Predict (assuming model already calibrated)
+terralab-predict-sqm convolved.tif my_model.joblib output_sqm.tif --elevation 1200.0
+```
+
+### Output
+
+The output raster contains:
+- **Values:** Predicted SQM in mag/arcsec² (higher = darker sky)
+- **Format:** Float32 GeoTIFF
+- **NoData:** NaN where input was masked
+- **Compression:** LZW
+- **Georeference:** Same as input raster
+
+### Interpreting Results
+
+**SQM Value Ranges:**
+
+| SQM (mag/arcsec²) | Sky Quality | Description |
+|-------------------|-------------|-------------|
+| < 18.0 | Poor | Urban/suburban sky |
+| 18.0 - 20.0 | Moderate | Rural with light pollution |
+| 20.0 - 21.5 | Good | Dark rural sky |
+| 21.5 - 22.0 | Excellent | Pristine dark sky |
+| > 22.0 | Exceptional | Remote natural darkness |
+
+### Workflow Integration
+
+This tool is typically the final step in the workflow:
+
+```bash
+# Full workflow example
+terralab-dvnl-preprocess viirs_2023.tif clean_2023.tif
+terralab-dvnl-convolve clean_2023.tif conv_2023.tif --sigma 30
+terralab-calibrate-sqm stations.csv model_2023.joblib
+terralab-predict-sqm conv_2023.tif model_2023.joblib sqm_2023.tif --elevation 800
+```
+
+### Limitations
+
+- **Elevation:** Currently uses a single default elevation value for the entire raster. For areas with significant topographic variation, consider processing in elevation bands or wait for DEM integration.
+- **Calibration region:** Models work best when applied to regions similar to the calibration dataset.
+- **Atmospheric conditions:** Assumes typical atmospheric transparency; not suitable for cloudy or hazy conditions.
+
+### Performance
+
+- Processes in blocks for memory efficiency
+- Typical speed: ~1-5 million pixels/second (hardware dependent)
+- Large rasters (> 50,000×50,000) may take several minutes
